@@ -1,7 +1,6 @@
-# Página de bloqueio (default_server) — IP CustomAddress do Technitium
-# Placeholders: {{IPV4}}
-
+# Blockpage HTTP no VIP/IP (sink CustomAddress) — sem HTTPS self-signed feio
 server {
+    listen {{VIP}}:80 default_server;
     listen {{IPV4}}:80 default_server;
     {{IPV6_LISTEN_80_DEFAULT}}
     server_name _;
@@ -12,38 +11,8 @@ server {
     access_log /var/log/nginx/dns-blockpage-access.log;
     error_log  /var/log/nginx/dns-blockpage-error.log warn;
 
-    add_header Cache-Control "no-store, no-cache, must-revalidate" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer" always;
-
-    location = /logo.png { try_files $uri =404; expires 1h; }
-    location = /logo.png { try_files /logo.png =404; expires 1h; }
-
-    location / {
-        try_files $uri /index.html;
-    }
-}
-
-server {
-    listen {{IPV4}}:443 ssl default_server;
-    {{IPV6_LISTEN_443_DEFAULT}}
-    server_name _;
-
-    ssl_certificate     /etc/nginx/ssl/blockpage.crt;
-    ssl_certificate_key /etc/nginx/ssl/blockpage.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    root /var/www/dns-blockpage;
-    index index.html;
-
-    access_log /var/log/nginx/dns-blockpage-ssl-access.log;
-    error_log  /var/log/nginx/dns-blockpage-ssl-error.log warn;
-
-    add_header Cache-Control "no-store, no-cache, must-revalidate" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer" always;
+    location = /logo.png { try_files /logo.png /logo.svg =404; expires 1h; }
+    location = /logo.svg { try_files /logo.svg =404; expires 1h; }
 
     location / {
         try_files $uri /index.html;

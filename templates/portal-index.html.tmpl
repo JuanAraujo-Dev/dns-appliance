@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#ff5a00">
+<meta name="theme-color" content="{{BRAND_PRIMARY}}">
 <base href="/portal/">
-<title>DNS Portal | DNS Appliance</title>
+<title>DNS Portal | {{COMPANY_NAME}}</title>
 <link rel="stylesheet" href="css/main.css">
 <link rel="stylesheet" href="css/brand.css">
 </head>
@@ -16,10 +16,10 @@
 <div id="login-screen" class="login-screen hidden">
   <div class="login-card">
     <div class="login-logo">
-      <div class="logo-wrap logo-wrap--login"><img src="assets/logo.png" alt="DNS Appliance" onerror="this.src='assets/logo.svg'"></div>
+      <div class="logo-wrap logo-wrap--login"><img src="assets/logo.png" alt="{{COMPANY_NAME}}" onerror="this.src='assets/logo.svg'"></div>
       <div class="login-logo-text">
         <h1>DNS Portal</h1>
-        <p>dns.example.com</p>
+        <p>{{DNS_FQDN}}</p>
       </div>
     </div>
     <div id="login-error" class="error-msg hidden"></div>
@@ -41,8 +41,8 @@
   <div class="app-layout">
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
-        <div class="logo-wrap logo-wrap--sidebar"><img src="assets/logo.png" alt="DNS Appliance" onerror="this.src='assets/logo.svg'"></div>
-        <div><h2>DNS Portal</h2><span id="brand-name">DNS Appliance</span></div>
+        <div class="logo-wrap logo-wrap--sidebar"><img src="assets/logo.png" alt="{{COMPANY_NAME}}" onerror="this.src='assets/logo.svg'"></div>
+        <div><h2>DNS Portal</h2><span id="brand-name">{{COMPANY_NAME}}</span></div>
       </div>
       <nav class="sidebar-nav">
         <button class="nav-item active" data-view="dashboard" type="button">Dashboard</button>
@@ -64,7 +64,7 @@
         <div class="topbar-left">
           <button id="menu-toggle" class="menu-toggle" type="button" aria-label="Menu">☰</button>
           <h1 id="page-title">Dashboard</h1>
-          <p><span id="runtime-fqdn">dns.example.com</span> · <span id="user-name">Admin</span></p>
+          <p><span id="runtime-fqdn">{{DNS_FQDN}}</span> · <span id="user-name">Admin</span></p>
         </div>
         <div class="topbar-right">
           <span id="health-pill" class="health-pill">…</span>

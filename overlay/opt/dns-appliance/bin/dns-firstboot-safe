@@ -1,8 +1,10 @@
-#!/usr/bin/env bash
-# Wrapper: se não houver TTY, grava env mínimo e aplica (útil em cloud-init)
+#!/bin/bash
+# Wrapper seguro do wizard (sem TTY → não trava boot)
 set -euo pipefail
-if [[ ! -t 0 ]] && [[ "${1:-}" != "--force" ]]; then
-  echo "Sem TTY — pulando wizard interativo. Configure com: dns-firstboot --force"
+if [[ ! -t 0 ]] && [[ ! -c /dev/tty1 ]]; then
+  echo "Sem TTY — pulando wizard. Configure com: dns-firstboot --force"
   exit 0
 fi
+# Se já configurado, sair
+[[ -f /var/lib/dns-appliance/configured ]] && exit 0
 exec /opt/dns-appliance/bin/dns-firstboot "$@"

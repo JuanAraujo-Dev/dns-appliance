@@ -1,0 +1,100 @@
+#!/bin/bash
+# Configura Keepalived e opcionalmente FRR/BGP
+set -euo pipefail
+APPLIANCE_ROOT="/opt/dns-appliance"
+# shellcheck disable=SC1091
+source "$APPLIANCE_ROOT/lib/common.sh"
+require_root
+load_env
+
+IFACE=$(detect_iface)
+VIP_HOST="${VIP_ADDRESS%%/*}"
+[[ -n "$VIP_HOST" ]] || die "VIP_ADDRESS vazio"
+
+install -d /etc/keepalived
+install -m 0755 "$APPLIANCE_ROOT/bin/chk_dns" /usr/local/sbin/chk_dns
+
+cat > /etc/keepalived/keepalived.conf <<EOF
+global_defs {
+  router_id DNS_APP_${HOSTNAME}
+  script_user root
+  enable_script_security
+  vrrp_version 3
+}
+
+vrrp_script chk_dns {
+  script "/usr/local/sbin/chk_dns"
+  interval 2
+  weight -30
+  fall 3
+  rise 2
+}
+
+vrrp_instance VI_DNS {
+  state BACKUP
+  interface ${IFACE}
+  virtual_router_id ${VRRP_ID}
+  priority ${VRRP_PRIORITY}
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass ${CLUSTER_SECRET:0:8}
+  }
+  virtual_ipaddress {
+    ${VIP_ADDRESS} dev ${IFACE}
+  }
+  track_script {
+    chk_dns
+  }
+  notify_master "/usr/local/sbin/dns-ha-notify MASTER"
+  notify_backup "/usr/local/sbin/dns-ha-notify BACKUP"
+  notify_fault  "/usr/local/sbin/dns-ha-notify FAULT"
+}
+EOF
+chmod 600 /etc/keepalived/keepalived.conf
+
+cat > /usr/local/sbin/dns-ha-notify <<'EOF'
+#!/bin/bash
+echo "STATE=$1" > /var/run/keepalived.state
+logger -t dns-ha "VRRP state -> $1"
+EOF
+chmod 0755 /usr/local/sbin/dns-ha-notify
+
+systemctl enable keepalived
+systemctl restart keepalived
+
+if [[ "${HA_MODE}" == "bgp" ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y -qq frr frr-pythontools || true
+  # Enable bgpd
+  sed -i 's/^bgpd=no/bgpd=yes/' /etc/frr/daemons || true
+  NEIGHBOR_BLOCK=""
+  IFS=',' read -ra NS <<<"${BGP_NEIGHBORS}"
+  for n in "${NS[@]}"; do
+    n=$(echo "$n" | xargs)
+    [[ -z "$n" ]] && continue
+    nip="${n%%|*}"
+    nasn="${n##*|}"
+    NEIGHBOR_BLOCK+=$'\n'" neighbor $nip remote-as $nasn"
+    NEIGHBOR_BLOCK+=$'\n'" neighbor $nip activate"
+  done
+  cat > /etc/frr/frr.conf <<EOF
+frr version 8
+frr defaults traditional
+hostname ${HOSTNAME}
+!
+router bgp ${BGP_ASN}
+ bgp router-id ${BGP_ROUTER_ID}
+ no bgp ebgp-requires-policy
+ neighbor fabric peer-group
+${NEIGHBOR_BLOCK}
+ address-family ipv4 unicast
+  network ${BGP_VIP_PREFIX:-$VIP_ADDRESS}
+ exit-address-family
+!
+EOF
+  systemctl enable frr
+  systemctl restart frr || log "WARN: frr restart falhou"
+fi
+
+log "HA configurado (mode=$HA_MODE vip=$VIP_ADDRESS)"

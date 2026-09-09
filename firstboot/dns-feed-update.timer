@@ -1,0 +1,11 @@
+[Unit]
+Description=DNS Appliance threat feed timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+AccuracySec=1min
+Unit=dns-feed-update.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=DNS Appliance health snapshot
+After=network.target dns.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dns-appliance/bin/dns-appliance-health

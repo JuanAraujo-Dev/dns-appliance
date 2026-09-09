@@ -1,5 +1,8 @@
-# Portal HTTPS + redirect + /portal /api /admin
-# Placeholders: {{DNS_FQDN}} {{IPV4}} {{IPV6_CIDR}} {{PORTAL_CERT}} {{PORTAL_KEY}}
+# Portal HTTPS + DoH + admin lockdown (geo \$dns_mgmt_ok injetado antes deste file)
+# Placeholders: {{DNS_FQDN}} {{IPV4}} {{PORTAL_CERT}} {{PORTAL_KEY}}
+
+limit_req_zone $binary_remote_addr zone=portallogin:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=doh:10m rate=20r/s;
 
 server {
     listen {{IPV4}}:80;
@@ -16,7 +19,7 @@ server {
 }
 
 server {
-    listen {{IPV4}}:443 ssl;
+    listen {{IPV4}}:443 ssl http2;
     {{IPV6_LISTEN_443}}
     server_name {{DNS_FQDN}};
 
@@ -29,15 +32,25 @@ server {
     add_header X-Frame-Options SAMEORIGIN always;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy same-origin always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self';" always;
+
+    location /dns-query {
+        limit_req zone=doh burst=40 nodelay;
+        proxy_pass http://127.0.0.1:5380/dns-query;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
 
     location /portal/ {
         alias /var/www/dns-portal/;
         index index.html;
-        try_files $uri $uri/ /portal/index.html;
-
-        location ~* \.(css|js|png|jpg|svg|woff2?)$ {
-            expires 7d;
-            add_header Cache-Control "public, immutable";
+        try_files $uri $uri/ =404;
+        location ~* \.(css|js|png|jpg|svg|woff2?|json)$ {
+            expires 1d;
+            add_header Cache-Control "public";
         }
     }
 
@@ -46,17 +59,20 @@ server {
     }
 
     location /api/ {
+        # API do portal: autenticada; rate limit login path handled in app
+        limit_req zone=portallogin burst=10 nodelay;
         proxy_pass http://127.0.0.1:5380/api/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Authorization $http_authorization;
         proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
     }
 
     location /admin/ {
+        if ($dns_mgmt_ok = 0) { return 403; }
         proxy_pass http://127.0.0.1:5380/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -66,19 +82,5 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:5380;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
     }
 }

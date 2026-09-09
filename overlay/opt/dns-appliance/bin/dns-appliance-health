@@ -1,0 +1,47 @@
+#!/bin/bash
+# Healthcheck periódico — grava status JSON para o portal
+set -euo pipefail
+APPLIANCE_ROOT="/opt/dns-appliance"
+# shellcheck disable=SC1091
+source "$APPLIANCE_ROOT/lib/common.sh" 2>/dev/null || true
+
+OUT=/var/www/dns-portal/health.json
+mkdir -p /var/www/dns-portal
+
+if [[ -f /etc/dns-appliance.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source /etc/dns-appliance.env
+  set +a
+fi
+
+VIP=""
+NODE=""
+DNS_OK=0
+API_OK=0
+MASTER=0
+command -v ipv4_only >/dev/null 2>&1 && NODE=$(ipv4_only) || NODE=$(hostname -I 2>/dev/null | awk '{print $1}')
+command -v effective_vip >/dev/null 2>&1 && VIP=$(effective_vip) || VIP="${VIP_ADDRESS%%/*}"
+systemctl is-active --quiet dns && dig +time=1 +tries=1 @127.0.0.1 . NS >/dev/null 2>&1 && DNS_OK=1
+curl -fsS --max-time 1 http://127.0.0.1:5380/ >/dev/null 2>&1 && API_OK=1
+if [[ -n "$VIP" ]] && ip -4 addr show 2>/dev/null | grep -q " ${VIP}/"; then MASTER=1; fi
+SYNC_LAG=""
+[[ -f /var/lib/dns-appliance/sync/last-export ]] && SYNC_LAG=$(cat /var/lib/dns-appliance/sync/last-export)
+[[ -f /var/lib/dns-appliance/sync/last-import ]] && SYNC_LAG=$(cat /var/lib/dns-appliance/sync/last-import)
+
+python3 - "$DNS_OK" "$API_OK" "$MASTER" "$VIP" "$NODE" "${DEPLOY_MODE:-standalone}" "$SYNC_LAG" <<'PY'
+import json, sys
+from pathlib import Path
+dns_ok, api_ok, master, vip, node, mode, sync = sys.argv[1:8]
+Path("/var/www/dns-portal/health.json").write_text(json.dumps({
+  "ts": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+  "dnsOk": dns_ok == "1",
+  "apiOk": api_ok == "1",
+  "master": master == "1",
+  "vip": vip,
+  "nodeIp": node,
+  "deployMode": mode,
+  "lastSync": sync,
+}, indent=2))
+PY
+chown www-data:www-data "$OUT" 2>/dev/null || true

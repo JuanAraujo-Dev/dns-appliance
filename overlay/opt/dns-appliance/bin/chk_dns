@@ -1,0 +1,11 @@
+#!/bin/bash
+# Healthcheck DNS local para Keepalived
+set -euo pipefail
+if ! systemctl is-active --quiet dns; then
+  exit 1
+fi
+if ! dig +time=1 +tries=1 @127.0.0.1 . NS >/dev/null 2>&1; then
+  # fallback: API up
+  curl -fsS --max-time 1 http://127.0.0.1:5380/ >/dev/null 2>&1 || exit 1
+fi
+exit 0

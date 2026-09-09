@@ -1,0 +1,7 @@
+[Unit]
+Description=DNS Appliance cluster sync
+After=network-online.target dns.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dns-appliance/bin/dns-appliance-sync

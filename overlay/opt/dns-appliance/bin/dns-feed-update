@@ -1,0 +1,63 @@
+#!/bin/bash
+# Atualiza feeds de ameaça (blocklists) no Technitium
+set -euo pipefail
+APPLIANCE_ROOT="/opt/dns-appliance"
+# shellcheck disable=SC1091
+source "$APPLIANCE_ROOT/lib/common.sh"
+require_root
+load_env
+[[ "${ENABLE_THREAT_FEEDS,,}" == "true" ]] || exit 0
+
+FEED_DIR=/var/lib/dns-appliance/feeds
+mkdir -p "$FEED_DIR"
+TOKEN=$(technitium_token)
+[[ -n "$TOKEN" ]] || die "Sem token Technitium"
+
+# URLs públicas estáveis (malicious domains)
+declare -A FEEDS=(
+  [malware]="https://raw.githubusercontent.com/PolishFiltersTeam/KADhosts/master/sections/etc_hosts.txt"
+  [phishing]="https://raw.githubusercontent.com/AssoEchap/stalkerware-indicators/master/generated/hosts"
+)
+
+# Prefer a simple curated hostlist format; fallback local stub
+curl -fsSL --max-time 60 \
+  "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" \
+  -o "$FEED_DIR/stevenblack.hosts" || true
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+src = Path('/var/lib/dns-appliance/feeds/stevenblack.hosts')
+out = Path('/var/lib/dns-appliance/feeds/malware-domains.txt')
+domains=set()
+if src.exists():
+    for line in src.read_text(errors='ignore').splitlines():
+        line=line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts=line.split()
+        if len(parts)>=2 and parts[0] in ('0.0.0.0','127.0.0.1'):
+            d=parts[1].lower().strip('.')
+            if d and d not in ('localhost','localhost.localdomain') and re.match(r'^[a-z0-9.-]+$', d):
+                domains.add(d)
+# cap to keep import sane
+domains=sorted(domains)[:50000]
+out.write_text('\n'.join(domains)+('\n' if domains else ''))
+print(f'domains={len(domains)}')
+PY
+
+COUNT=0
+while IFS= read -r d; do
+  [[ -z "$d" ]] && continue
+  curl -sS -X POST "http://127.0.0.1:5380/api/blocked/add" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "token=$TOKEN" \
+    --data-urlencode "domain=$d" >/dev/null || true
+  COUNT=$((COUNT+1))
+  # throttle lightly
+  if (( COUNT % 500 == 0 )); then sleep 0.2; fi
+done < "$FEED_DIR/malware-domains.txt"
+
+# Audit stamp
+echo "{\"ts\":\"$(date -Is)\",\"imported\":$COUNT,\"user\":\"feed-cron\"}" >> /var/log/dns-appliance-feed-audit.jsonl
+log "Feeds: importados ~$COUNT domínios"

@@ -1,0 +1,111 @@
+#!/bin/bash
+# Sync de política MASTER → BACKUP
+set -euo pipefail
+APPLIANCE_ROOT="/opt/dns-appliance"
+# shellcheck disable=SC1091
+source "$APPLIANCE_ROOT/lib/common.sh"
+require_root
+load_env
+
+[[ "${DEPLOY_MODE}" == "cluster" ]] || exit 0
+[[ -n "${CLUSTER_PEER:-}" ]] || exit 0
+[[ -n "${CLUSTER_SECRET:-}" ]] || exit 0
+
+SYNC_DIR="/var/lib/dns-appliance/sync"
+mkdir -p "$SYNC_DIR"
+
+export_bundle() {
+  local token bundle
+  token=$(technitium_token)
+  bundle="$SYNC_DIR/bundle-$$.tgz"
+  mkdir -p "$SYNC_DIR/stage"
+  cp -a /etc/dns-appliance.env "$SYNC_DIR/stage/appliance.env"
+  cp -a /opt/dns-appliance/branding "$SYNC_DIR/stage/" 2>/dev/null || true
+  if [[ -n "$token" ]]; then
+    curl -fsS "http://127.0.0.1:5380/api/blocked/export?token=$token" -o "$SYNC_DIR/stage/blocked.txt" || true
+    curl -fsS "http://127.0.0.1:5380/api/allowed/export?token=$token" -o "$SYNC_DIR/stage/allowed.txt" || true
+  fi
+  tar -C "$SYNC_DIR/stage" -czf "$bundle" .
+  # Push via authenticated HTTPS endpoint on peer (nginx internal) or scp-like curl
+  openssl enc -aes-256-cbc -pbkdf2 -salt -in "$bundle" -out "$SYNC_DIR/bundle.enc" -pass pass:"$CLUSTER_SECRET"
+  curl -fsS -X PUT "https://${CLUSTER_PEER}/portal/../sync/upload" \
+    -H "X-Cluster-Secret: $CLUSTER_SECRET" \
+    --data-binary @"$SYNC_DIR/bundle.enc" \
+    --insecure >/dev/null 2>&1 || \
+  curl -fsS -X PUT "http://${CLUSTER_PEER}:5389/upload" \
+    -H "X-Cluster-Secret: $CLUSTER_SECRET" \
+    --data-binary @"$SYNC_DIR/bundle.enc" >/dev/null 2>&1 || \
+  # fallback: write for local puller
+  cp -f "$SYNC_DIR/bundle.enc" "$SYNC_DIR/latest.enc"
+  rm -f "$bundle"
+  date -Is > "$SYNC_DIR/last-export"
+}
+
+import_bundle() {
+  local enc="$SYNC_DIR/incoming.enc"
+  [[ -f "$enc" ]] || [[ -f "$SYNC_DIR/latest.enc" ]] || return 0
+  [[ -f "$enc" ]] || enc="$SYNC_DIR/latest.enc"
+  openssl enc -aes-256-cbc -pbkdf2 -d -in "$enc" -out "$SYNC_DIR/incoming.tgz" -pass pass:"$CLUSTER_SECRET" || return 1
+  rm -rf "$SYNC_DIR/incoming"
+  mkdir -p "$SYNC_DIR/incoming"
+  tar -C "$SYNC_DIR/incoming" -xzf "$SYNC_DIR/incoming.tgz"
+  # Merge branding + blocked lists; do NOT overwrite node-local IP fields blindly
+  if [[ -f "$SYNC_DIR/incoming/appliance.env" ]]; then
+    # Import policy keys only
+    python3 - <<'PY'
+import re
+from pathlib import Path
+src = Path('/var/lib/dns-appliance/sync/incoming/appliance.env').read_text()
+dstp = Path('/etc/dns-appliance.env')
+dst = dstp.read_text() if dstp.exists() else ''
+keys = [
+  'COMPANY_NAME','BRAND_PRIMARY','BRAND_ACCENT','SUPPORT_PHONE','SUPPORT_URL','SUPPORT_EMAIL',
+  'BLOCK_LEGAL_TEXT','CLIENT_CIDRS','DNS_FQDN','ENABLE_THREAT_FEEDS','ENABLE_DOT','ENABLE_DOH',
+  'ENABLE_DNSSEC_VALIDATION','LOGO_FILE','BRAND_PRIMARY'
+]
+vals = {}
+for line in src.splitlines():
+  if '=' not in line or line.strip().startswith('#'):
+    continue
+  k,v = line.split('=',1)
+  vals[k.strip()] = v.strip()
+out = {}
+for line in dst.splitlines():
+  if '=' in line and not line.strip().startswith('#'):
+    k,v = line.split('=',1)
+    out[k.strip()] = v.strip()
+for k in keys:
+  if k in vals:
+    out[k] = vals[k]
+# preserve local node network keys already in out
+text = '\n'.join(f'{k}={out[k]}' for k in sorted(out)) + '\n'
+dstp.write_text(text)
+PY
+  fi
+  if [[ -d "$SYNC_DIR/incoming/branding" ]]; then
+    cp -a "$SYNC_DIR/incoming/branding/." /opt/dns-appliance/branding/ || true
+  fi
+  "$APPLIANCE_ROOT/bin/dns-apply-config" --from-sync || true
+  token=$(technitium_token)
+  if [[ -n "$token" && -f "$SYNC_DIR/incoming/blocked.txt" ]]; then
+    # import line by line
+    while IFS= read -r d; do
+      [[ -z "$d" ]] && continue
+      curl -sS -X POST "http://127.0.0.1:5380/api/blocked/add" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        --data-urlencode "token=$token" --data-urlencode "domain=$d" >/dev/null || true
+    done < "$SYNC_DIR/incoming/blocked.txt"
+  fi
+  date -Is > "$SYNC_DIR/last-import"
+}
+
+# Decide role
+if ip -4 addr show | grep -q " ${VIP_ADDRESS%%/*}/"; then
+  export_bundle
+else
+  # try pull from peer HTTP sync agent
+  curl -fsS "http://${CLUSTER_PEER}:5389/latest" \
+    -H "X-Cluster-Secret: $CLUSTER_SECRET" \
+    -o "$SYNC_DIR/incoming.enc" 2>/dev/null || true
+  import_bundle
+fi

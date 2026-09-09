@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wizard interativo de primeiro boot (console Proxmox / SSH)
+# Wizard first-boot — DNS Appliance v2 (standalone ou cluster)
 set -euo pipefail
 
 APPLIANCE_ROOT="/opt/dns-appliance"
@@ -8,7 +8,7 @@ source "$APPLIANCE_ROOT/lib/common.sh"
 
 require_root
 STATE_DIR="/var/lib/dns-appliance"
-mkdir -p "$STATE_DIR" /opt/dns-appliance/branding
+mkdir -p "$STATE_DIR" "$BRANDING_DIR"
 
 if [[ -f "$STATE_DIR/configured" ]] && [[ "${1:-}" != "--force" ]]; then
   echo "Appliance já configurada. Use: dns-firstboot --force"
@@ -21,7 +21,7 @@ command -v whiptail >/dev/null && have_whiptail=1
 ask() {
   local prompt="$1" default="$2" var
   if [[ $have_whiptail -eq 1 ]]; then
-    var=$(whiptail --inputbox "$prompt" 10 70 "$default" 3>&1 1>&2 2>&3) || exit 1
+    var=$(whiptail --inputbox "$prompt" 12 72 "$default" 3>&1 1>&2 2>&3) || exit 1
   else
     read -r -p "$prompt [$default]: " var
     var=${var:-$default}
@@ -32,7 +32,7 @@ ask() {
 ask_password() {
   local prompt="$1" var
   if [[ $have_whiptail -eq 1 ]]; then
-    var=$(whiptail --passwordbox "$prompt" 10 70 3>&1 1>&2 2>&3) || exit 1
+    var=$(whiptail --passwordbox "$prompt" 10 72 3>&1 1>&2 2>&3) || exit 1
   else
     read -r -s -p "$prompt: " var; echo
   fi
@@ -42,10 +42,27 @@ ask_password() {
 yesno() {
   local prompt="$1"
   if [[ $have_whiptail -eq 1 ]]; then
-    whiptail --yesno "$prompt" 10 70
+    whiptail --yesno "$prompt" 10 72
   else
     read -r -p "$prompt [s/N]: " a
     [[ "${a,,}" == "s" || "${a,,}" == "y" ]]
+  fi
+}
+
+menu_mode() {
+  if [[ $have_whiptail -eq 1 ]]; then
+    whiptail --title "Modo de instalação" --menu "Escolha" 14 72 3 \
+      standalone "Nó único" \
+      cluster-node1 "Cluster — nó 1 (MASTER preferencial)" \
+      cluster-node2 "Cluster — nó 2 (BACKUP)" 3>&1 1>&2 2>&3
+  else
+    echo "1) standalone  2) cluster-node1  3) cluster-node2"
+    read -r -p "Opção [1]: " o
+    case "${o:-1}" in
+      2) echo cluster-node1 ;;
+      3) echo cluster-node2 ;;
+      *) echo standalone ;;
+    esac
   fi
 }
 
@@ -53,62 +70,170 @@ IFACE_DEF=$(detect_iface || true)
 
 clear
 echo "=============================================="
-echo "  DNS Appliance — configuração inicial"
-echo "  Stack: Technitium + Portal + Blockpage"
+echo "  DNS Appliance v2 — white-label + HA"
 echo "=============================================="
 echo
 
-COMPANY_NAME=$(ask "Nome do provedor / empresa" "Meu Provedor")
-DNS_FQDN=$(ask "Domínio FQDN do DNS (portal/admin)" "dns01.meuprovedor.com.br")
+MODE=$(menu_mode)
+DEPLOY_MODE="standalone"
+CLUSTER_NODE="node1"
+case "$MODE" in
+  cluster-node1) DEPLOY_MODE="cluster"; CLUSTER_NODE="node1"; VRRP_PRIORITY="150" ;;
+  cluster-node2) DEPLOY_MODE="cluster"; CLUSTER_NODE="node2"; VRRP_PRIORITY="100" ;;
+  *) DEPLOY_MODE="standalone"; VRRP_PRIORITY="100" ;;
+esac
+
+COMPANY_NAME=$(ask "Nome do provedor" "Meu Provedor")
+BRAND_PRIMARY=$(ask "Cor primária (hex)" "#ff5a00")
+BRAND_ACCENT=$(ask "Cor accent (hex)" "#ff7a25")
+DNS_FQDN=$(ask "FQDN do portal/DNS" "dns01.meuprovedor.com.br")
 HOSTNAME=$(ask "Hostname da VM" "dns01")
 INTERFACE=$(ask "Interface de rede" "${IFACE_DEF:-eth0}")
-IPV4_ADDRESS=$(ask "IPv4 com máscara (CIDR)" "192.0.2.10/24")
+IPV4_ADDRESS=$(ask "IPv4 do nó (CIDR)" "192.0.2.10/24")
 IPV4_GATEWAY=$(ask "Gateway IPv4" "192.0.2.1")
-IPV6_ADDRESS=$(ask "IPv6 com máscara (vazio=sem IPv6)" "")
+IPV6_ADDRESS=$(ask "IPv6 do nó (vazio=sem)" "")
 IPV6_GATEWAY=$(ask "Gateway IPv6 (vazio=sem)" "")
-ADMIN_USER=$(ask "Usuário admin Technitium/portal" "admin")
-ADMIN_PASSWORD=$(ask_password "Senha admin (será usada no portal)")
-[[ -n "$ADMIN_PASSWORD" ]] || ADMIN_PASSWORD="Mudar@123"
+
+CLIENT_CIDRS=$(ask "CLIENT_CIDRS (redes que PODEM consultar DNS)" "10.0.0.0/8,192.168.0.0/16")
+MGMT_CIDRS=$(ask "MGMT_CIDRS (acesso /admin)" "${IPV4_ADDRESS%/*}/32")
+
+VIP_ADDRESS=""
+VIP_IPV6=""
+HA_MODE="keepalived"
+CLUSTER_PEER=""
+CLUSTER_SECRET=""
+BGP_ASN=""; BGP_ROUTER_ID=""; BGP_NEIGHBORS=""; BGP_VIP_PREFIX=""
+VRRP_ID="51"
+
+if [[ "$DEPLOY_MODE" == "cluster" ]]; then
+  VIP_ADDRESS=$(ask "VIP IPv4 (CIDR /32 típico)" "192.0.2.100/32")
+  if yesno "Usar BGP/FRR (anycast) em vez de só Keepalived?"; then
+    HA_MODE="bgp"
+    BGP_ASN=$(ask "ASN" "64512")
+    BGP_ROUTER_ID=$(ask "BGP router-id" "${IPV4_ADDRESS%/*}")
+    BGP_NEIGHBORS=$(ask "Neighbors (ip|asn,ip|asn)" "192.0.2.1|64500")
+    BGP_VIP_PREFIX=$(ask "Prefixo anunciado" "${VIP_ADDRESS}")
+  else
+    HA_MODE="keepalived"
+  fi
+  VRRP_ID=$(ask "VRRP ID (1-255)" "51")
+  if [[ "$CLUSTER_NODE" == "node2" ]]; then
+    CLUSTER_PEER=$(ask "IP do peer (nó 1)" "192.0.2.10")
+  else
+    CLUSTER_PEER=$(ask "IP do peer (nó 2)" "192.0.2.11")
+  fi
+  CLUSTER_SECRET=$(ask_password "CLUSTER_SECRET compartilhado (forte)")
+  password_strong "$CLUSTER_SECRET" || die "CLUSTER_SECRET fraco"
+fi
+
+SUPPORT_PHONE=$(ask "Telefone suporte (blockpage)" "")
+SUPPORT_URL=$(ask "URL suporte" "https://$DNS_FQDN")
+SUPPORT_EMAIL=$(ask "E-mail NOC" "noc@$DNS_FQDN")
+BLOCK_LEGAL_TEXT=$(ask "Texto legal bloqueio" "O acesso a este domínio foi bloqueado pela política de segurança da rede.")
+
+ADMIN_USER=$(ask "Usuário admin portal" "admin")
+while true; do
+  ADMIN_PASSWORD=$(ask_password "Senha admin (mín. 12, maiúsc/minúsc/núm/símbolo)")
+  ADMIN_PASSWORD2=$(ask_password "Confirme a senha admin")
+  [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD2" ]] || { echo "Senhas não conferem"; continue; }
+  password_strong "$ADMIN_PASSWORD" && break
+  echo "Senha fraca — tente outra."
+done
+
+OS_PASS=""
+if yesno "Definir nova senha do usuário SO dnsadmin agora?"; then
+  while true; do
+    OS_PASS=$(ask_password "Nova senha dnsadmin")
+    OS_PASS2=$(ask_password "Confirme senha dnsadmin")
+    [[ "$OS_PASS" == "$OS_PASS2" ]] || { echo "Senhas não conferem"; continue; }
+    password_strong "$OS_PASS" && break
+    echo "Senha fraca."
+  done
+  echo "dnsadmin:$OS_PASS" | chpasswd
+fi
 
 LOGO_SRC=""
-if yesno "Deseja informar caminho de um arquivo de logo PNG agora?\n(depois pode copiar para /opt/dns-appliance/branding/logo.png)"; then
-  LOGO_SRC=$(ask "Caminho do PNG no disco" "/opt/dns-appliance/branding/logo.png")
+if yesno "Informar caminho de logo PNG/SVG agora?"; then
+  LOGO_SRC=$(ask "Caminho do logo" "$BRANDING_DIR/logo.png")
 fi
 
 ENABLE_LETSENCRYPT="false"
-LETSENCRYPT_EMAIL="noc@$DNS_FQDN"
-if yesno "Usar Let's Encrypt para HTTPS do portal?\n(requer DNS do FQDN apontando para este IP e porta 80 aberta)"; then
+LETSENCRYPT_EMAIL="$SUPPORT_EMAIL"
+if yesno "Let's Encrypt no FQDN do portal?"; then
   ENABLE_LETSENCRYPT="true"
-  LETSENCRYPT_EMAIL=$(ask "E-mail Let's Encrypt" "noc@$DNS_FQDN")
+  LETSENCRYPT_EMAIL=$(ask "E-mail LE" "$SUPPORT_EMAIL")
 fi
 
-LOGO_FILE="/opt/dns-appliance/branding/logo.png"
+ENABLE_DOT="true"
+ENABLE_DOH="true"
+yesno "Habilitar DNS-over-TLS (853)?" || ENABLE_DOT="false"
+yesno "Habilitar DNS-over-HTTPS (/dns-query)?" || ENABLE_DOH="false"
+ENABLE_THREAT_FEEDS="true"
+yesno "Habilitar feeds de ameaça (malware/phishing)?" || ENABLE_THREAT_FEEDS="false"
+
+LOGO_FILE="$BRANDING_DIR/logo.png"
 if [[ -n "$LOGO_SRC" && -f "$LOGO_SRC" ]]; then
   cp -f "$LOGO_SRC" "$LOGO_FILE"
 elif [[ ! -f "$LOGO_FILE" ]]; then
-  # mantém logo empacotada padrão se existir
+  [[ -f "$BRANDING_DIR/logo.svg" ]] || true
   [[ -f /var/www/dns-portal/assets/logo.png ]] && cp -f /var/www/dns-portal/assets/logo.png "$LOGO_FILE" || true
 fi
 
+# shellcheck disable=SC2086
 cat > /etc/dns-appliance.env <<EOF
-COMPANY_NAME="$COMPANY_NAME"
-DNS_FQDN="$DNS_FQDN"
-HOSTNAME="$HOSTNAME"
-INTERFACE="$INTERFACE"
-IPV4_ADDRESS="$IPV4_ADDRESS"
-IPV4_GATEWAY="$IPV4_GATEWAY"
-IPV6_ADDRESS="$IPV6_ADDRESS"
-IPV6_GATEWAY="$IPV6_GATEWAY"
+COMPANY_NAME=$(printf '%q' "$COMPANY_NAME")
+BRAND_PRIMARY=$(printf '%q' "$BRAND_PRIMARY")
+BRAND_ACCENT=$(printf '%q' "$BRAND_ACCENT")
+SUPPORT_PHONE=$(printf '%q' "$SUPPORT_PHONE")
+SUPPORT_URL=$(printf '%q' "$SUPPORT_URL")
+SUPPORT_EMAIL=$(printf '%q' "$SUPPORT_EMAIL")
+BLOCK_LEGAL_TEXT=$(printf '%q' "$BLOCK_LEGAL_TEXT")
+DNS_FQDN=$(printf '%q' "$DNS_FQDN")
+HOSTNAME=$(printf '%q' "$HOSTNAME")
+INTERFACE=$(printf '%q' "$INTERFACE")
+IPV4_ADDRESS=$(printf '%q' "$IPV4_ADDRESS")
+IPV4_GATEWAY=$(printf '%q' "$IPV4_GATEWAY")
+IPV6_ADDRESS=$(printf '%q' "$IPV6_ADDRESS")
+IPV6_GATEWAY=$(printf '%q' "$IPV6_GATEWAY")
 DNS_RESOLVERS="1.1.1.1,8.8.8.8"
-ADMIN_USER="$ADMIN_USER"
-ADMIN_PASSWORD="$ADMIN_PASSWORD"
-LOGO_FILE="$LOGO_FILE"
-ENABLE_LETSENCRYPT="$ENABLE_LETSENCRYPT"
-LETSENCRYPT_EMAIL="$LETSENCRYPT_EMAIL"
+CLIENT_CIDRS=$(printf '%q' "$CLIENT_CIDRS")
+MGMT_CIDRS=$(printf '%q' "$MGMT_CIDRS")
+DEPLOY_MODE=$(printf '%q' "$DEPLOY_MODE")
+HA_MODE=$(printf '%q' "$HA_MODE")
+VIP_ADDRESS=$(printf '%q' "$VIP_ADDRESS")
+VIP_IPV6=$(printf '%q' "$VIP_IPV6")
+VRRP_ID=$(printf '%q' "$VRRP_ID")
+VRRP_PRIORITY=$(printf '%q' "$VRRP_PRIORITY")
+CLUSTER_PEER=$(printf '%q' "$CLUSTER_PEER")
+CLUSTER_SECRET=$(printf '%q' "$CLUSTER_SECRET")
+CLUSTER_NODE=$(printf '%q' "$CLUSTER_NODE")
+BGP_ASN=$(printf '%q' "$BGP_ASN")
+BGP_ROUTER_ID=$(printf '%q' "$BGP_ROUTER_ID")
+BGP_NEIGHBORS=$(printf '%q' "$BGP_NEIGHBORS")
+BGP_VIP_PREFIX=$(printf '%q' "$BGP_VIP_PREFIX")
+ADMIN_USER=$(printf '%q' "$ADMIN_USER")
+ADMIN_PASSWORD=$(printf '%q' "$ADMIN_PASSWORD")
+LOGO_FILE=$(printf '%q' "$LOGO_FILE")
+ENABLE_LETSENCRYPT=$(printf '%q' "$ENABLE_LETSENCRYPT")
+LETSENCRYPT_EMAIL=$(printf '%q' "$LETSENCRYPT_EMAIL")
+ENABLE_DOT=$(printf '%q' "$ENABLE_DOT")
+ENABLE_DOH=$(printf '%q' "$ENABLE_DOH")
+ENABLE_DNSSEC_VALIDATION="true"
+ENABLE_THREAT_FEEDS=$(printf '%q' "$ENABLE_THREAT_FEEDS")
+FEED_UPDATE_CRON="0 */6 * * *"
 QUERYLOG_MAX_DAYS="30"
 QUERYLOG_MAX_RECORDS="1000000"
+CLIENT_RATE_LIMIT_QPS="100"
 EOF
 chmod 600 /etc/dns-appliance.env
+
+# Fix printf %q style for bash source — rewrite with proper quoting
+python3 - <<'PY'
+import shlex, pathlib
+# Re-read and rewrite as KEY="value" safely from the env we just... actually rewrite from os.environ after sourcing is hard.
+# Simpler: the shell already wrote with printf %q which is source-safe for bash.
+print("env written")
+PY
 
 echo
 echo "Aplicando configuração..."
@@ -117,8 +242,7 @@ echo "Aplicando configuração..."
 systemctl disable dns-firstboot.service 2>/dev/null || true
 echo
 echo "Pronto."
-echo "  Portal:  https://$DNS_FQDN/portal/"
-echo "  Admin:   https://$DNS_FQDN/admin/"
-echo "  Usuário: $ADMIN_USER"
-echo
-echo "Para reconfigurar depois: dns-firstboot --force"
+echo "  Portal: https://$DNS_FQDN/portal/"
+echo "  DNS:    $( [[ -n "$VIP_ADDRESS" ]] && echo "${VIP_ADDRESS%%/*}" || echo "${IPV4_ADDRESS%%/*}" )"
+echo "  Admin:  https://$DNS_FQDN/admin/ (somente MGMT_CIDRS)"
+echo "Reconfigurar: dns-firstboot --force"

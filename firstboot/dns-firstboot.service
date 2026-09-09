@@ -1,20 +1,17 @@
 [Unit]
 Description=DNS Appliance first-boot wizard
-After=network-online.target multi-user.target
+After=network-online.target dns.service
 Wants=network-online.target
 ConditionPathExists=!/var/lib/dns-appliance/configured
 
 [Service]
 Type=oneshot
-# Roda no console gráfico/VNC do Proxmox (tty1). Se não houver TTY, use SSH: dns-firstboot
-ExecStart=/opt/dns-appliance/bin/dns-firstboot
-StandardInput=tty-force
-StandardOutput=journal+console
-StandardError=journal+console
+Environment=TERM=linux
 TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-TimeoutStartSec=infinity
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+ExecStart=/opt/dns-appliance/bin/dns-firstboot-safe
 RemainAfterExit=yes
 
 [Install]

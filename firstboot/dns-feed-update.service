@@ -1,0 +1,7 @@
+[Unit]
+Description=DNS Appliance threat feed update
+After=network-online.target dns.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dns-appliance/bin/dns-feed-update

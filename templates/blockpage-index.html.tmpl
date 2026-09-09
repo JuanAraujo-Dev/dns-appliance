@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Acesso bloqueado | DNS Appliance</title>
+<title>Acesso bloqueado | {{COMPANY_NAME}}</title>
 <style>
-:root { --brand: #ff5a00; --bg:#0b0d10; --card:#14181f; --text:#f3f4f6; --muted:#9ca3af; }
+:root { --brand: {{BRAND_PRIMARY}}; --bg:#0b0d10; --card:#14181f; --text:#f3f4f6; --muted:#9ca3af; }
 *{box-sizing:border-box;margin:0;padding:0}
 body{min-height:100vh;font-family:ui-sans-serif,system-ui,Segoe UI,sans-serif;background:radial-gradient(circle at 80% 0%, color-mix(in srgb,var(--brand) 25%, transparent), transparent 40%), var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;padding:24px}
 .card{max-width:520px;width:100%;background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:36px 28px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45)}
@@ -19,25 +19,25 @@ a{color:var(--brand)}
 </head>
 <body>
   <div class="card">
-    <img class="logo" src="/logo.png" alt="DNS Appliance" onerror="this.src='/logo.svg'">
+    <img class="logo" src="/logo.png" alt="{{COMPANY_NAME}}" onerror="this.src='/logo.svg'">
     <h1>Acesso bloqueado</h1>
-    <p>Acesso bloqueado pela política de segurança da rede.</p>
+    <p>{{BLOCK_LEGAL_TEXT}}</p>
     <p class="domain" id="blocked-host"></p>
-    <p>Rede DNS Appliance</p>
+    <p>Rede {{COMPANY_NAME}}</p>
     <p class="meta">
       <span id="support"></span>
     </p>
   </div>
 <script>
 document.getElementById('blocked-host').textContent = location.hostname || 'domÃ­nio bloqueado';
-const phone = "";
-const url = "";
-const email = "";
+const phone = "{{SUPPORT_PHONE}}";
+const url = "{{SUPPORT_URL}}";
+const email = "{{SUPPORT_EMAIL}}";
 const bits = [];
 if (phone) bits.push(phone);
 if (url) bits.push('<a href="'+url+'">'+url+'</a>');
 if (email) bits.push('<a href="mailto:'+email+'">'+email+'</a>');
-document.getElementById('support').innerHTML = bits.join(' Â· ') || 'DNS Appliance';
+document.getElementById('support').innerHTML = bits.join(' Â· ') || '{{COMPANY_NAME}}';
 </script>
 </body>
 </html>

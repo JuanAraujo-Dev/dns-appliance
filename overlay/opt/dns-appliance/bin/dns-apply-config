@@ -1,5 +1,5 @@
 #!/bin/bash
-# Aplica IP, domínio, nome e logo na stack completa (Technitium + Nginx + portal + blockpage)
+# Aplica configuração white-label + ACL + HA + TLS + Technitium
 set -euo pipefail
 
 APPLIANCE_ROOT="/opt/dns-appliance"
@@ -7,24 +7,29 @@ APPLIANCE_ROOT="/opt/dns-appliance"
 source "$APPLIANCE_ROOT/lib/common.sh"
 
 require_root
+FROM_SYNC=0
+[[ "${1:-}" == "--from-sync" ]] && FROM_SYNC=1
+
 load_env
 ensure_dirs
 
 IFACE=$(detect_iface)
 [[ -n "$IFACE" ]] || die "Não foi possível detectar interface de rede"
 IPV4_HOST=$(ipv4_only)
+VIP_HOST=$(effective_vip)
+export INTERFACE="$IFACE"
 
-log "Aplicando config: company=$COMPANY_NAME fqdn=$DNS_FQDN ip=$IPV4_ADDRESS iface=$IFACE"
+log "Aplicando: company=$COMPANY_NAME fqdn=$DNS_FQDN ip=$IPV4_ADDRESS vip=$VIP_HOST mode=$DEPLOY_MODE"
 
 # --- Hostname ---
 hostnamectl set-hostname "$HOSTNAME" || true
-if grep -qE '^10\.0\.0\.1|^127\.0\.1\.1' /etc/hosts 2>/dev/null; then
-  sed -i "s/^127\\.0\\.1\\.1.*/127.0.1.1\t$HOSTNAME/" /etc/hosts || true
+if grep -qE '^127\.0\.1\.1' /etc/hosts 2>/dev/null; then
+  sed -i "s/^127\\.0\\.1\\.1.*/127.0.1.1\t$HOSTNAME $DNS_FQDN/" /etc/hosts || true
 else
-  grep -q "$HOSTNAME" /etc/hosts || echo -e "127.0.1.1\t$HOSTNAME" >> /etc/hosts
+  echo -e "127.0.1.1\t$HOSTNAME $DNS_FQDN" >> /etc/hosts
 fi
 
-# --- Netplan ---
+# --- Netplan (IP do nó; VIP fica com keepalived) ---
 RESOLVER_YAML=$(echo "$DNS_RESOLVERS" | tr ',' '\n' | sed 's/^/        - /')
 cat > /etc/netplan/01-dns-appliance.yaml <<EOF
 network:
@@ -48,70 +53,46 @@ E6
 fi)
 EOF
 chmod 600 /etc/netplan/01-dns-appliance.yaml
-netplan apply || log "WARN: netplan apply falhou (pode ser normal em chroot)"
+netplan apply || log "WARN: netplan apply falhou"
 
-# --- Logo ---
+# --- Branding CSS tokens + logo ---
+mkdir -p /var/www/dns-portal/assets /var/www/dns-blockpage
 if [[ -f "$LOGO_FILE" ]]; then
   cp -f "$LOGO_FILE" /var/www/dns-portal/assets/logo.png
   cp -f "$LOGO_FILE" /var/www/dns-blockpage/logo.png
-  # compat paths usados pela blockpage antiga
-  cp -f "$LOGO_FILE" /var/www/dns-blockpage/logo.png
+elif [[ -f "$APPLIANCE_ROOT/branding/logo.svg" ]]; then
+  cp -f "$APPLIANCE_ROOT/branding/logo.svg" /var/www/dns-portal/assets/logo.svg
+  cp -f "$APPLIANCE_ROOT/branding/logo.svg" /var/www/dns-blockpage/logo.svg
 fi
 
-# --- Templates Nginx ---
+cat > /var/www/dns-portal/css/brand.css <<EOF
+:root {
+  --orange: ${BRAND_PRIMARY};
+  --orange2: ${BRAND_ACCENT};
+  --orange-glow: color-mix(in srgb, ${BRAND_PRIMARY} 22%, transparent);
+}
+EOF
+
+# Render portal/blockpage from templates (idempotent)
+if [[ -f "$TMPL_DIR/portal-index.html.tmpl" ]]; then
+  render_template "$TMPL_DIR/portal-index.html.tmpl" /var/www/dns-portal/index.html
+fi
+if [[ -f "$TMPL_DIR/blockpage-index.html.tmpl" ]]; then
+  render_template "$TMPL_DIR/blockpage-index.html.tmpl" /var/www/dns-blockpage/index.html
+fi
+
+# --- IPv6 listen snippets ---
 IPV6_HOST=""
 if [[ -n "${IPV6_ADDRESS:-}" ]]; then
   IPV6_HOST="${IPV6_ADDRESS%%/*}"
-fi
-render_template "$TMPL_DIR/nginx-portal.conf.tmpl" /etc/nginx/sites-available/dns-portal
-render_template "$TMPL_DIR/nginx-blockpage.conf.tmpl" /etc/nginx/sites-available/dns-blockpage
-
-if [[ -n "$IPV6_HOST" ]]; then
-  sed -i \
-    -e "s|{{IPV6_LISTEN_80}}|listen [$IPV6_HOST]:80;|g" \
-    -e "s|{{IPV6_LISTEN_443}}|listen [$IPV6_HOST]:443 ssl;|g" \
-    -e "s|{{IPV6_LISTEN_80_DEFAULT}}|listen [$IPV6_HOST]:80 default_server;|g" \
-    -e "s|{{IPV6_LISTEN_443_DEFAULT}}|listen [$IPV6_HOST]:443 ssl default_server;|g" \
-    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/dns-blockpage
+  IPV6_LISTEN_80="listen [$IPV6_HOST]:80;"
+  IPV6_LISTEN_443="listen [$IPV6_HOST]:443 ssl;"
+  IPV6_LISTEN_80_DEFAULT="listen [$IPV6_HOST]:80 default_server;"
+  IPV6_LISTEN_443_DEFAULT="listen [$IPV6_HOST]:443 ssl default_server;"
 else
-  sed -i \
-    -e "s|{{IPV6_LISTEN_80}}||g" \
-    -e "s|{{IPV6_LISTEN_443}}||g" \
-    -e "s|{{IPV6_LISTEN_80_DEFAULT}}||g" \
-    -e "s|{{IPV6_LISTEN_443_DEFAULT}}||g" \
-    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/dns-blockpage
+  IPV6_LISTEN_80=""; IPV6_LISTEN_443=""; IPV6_LISTEN_80_DEFAULT=""; IPV6_LISTEN_443_DEFAULT=""
 fi
-
-ln -sfn /etc/nginx/sites-available/dns-portal /etc/nginx/sites-enabled/dns-portal
-ln -sfn /etc/nginx/sites-available/dns-blockpage /etc/nginx/sites-enabled/dns-blockpage
-rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/jd-blockpage
-
-# --- Branding no portal / blockpage ---
-if [[ -f /var/www/dns-portal/index.html ]]; then
-  sed -i \
-    -e "s|{{COMPANY_NAME}}|$COMPANY_NAME|g" \
-    -e "s|{{DNS_FQDN}}|$DNS_FQDN|g" \
-    -e "s|Provider Name|$COMPANY_NAME|g" \
-    -e "s|dns\\.example\\.com|$DNS_FQDN|g" \
-    -e "s|JD Telecom|$COMPANY_NAME|g" \
-    -e "s|dns01\\.jdtelecom\\.com\\.br|$DNS_FQDN|g" \
-    /var/www/dns-portal/index.html || true
-fi
-if [[ -f /var/www/dns-blockpage/index.html ]]; then
-  sed -i \
-    -e "s|{{COMPANY_NAME}}|$COMPANY_NAME|g" \
-    -e "s|{{DNS_FQDN}}|$DNS_FQDN|g" \
-    -e "s|Provider Name|$COMPANY_NAME|g" \
-    -e "s|JD Telecom|$COMPANY_NAME|g" \
-    /var/www/dns-blockpage/index.html || true
-fi
-if [[ -f /var/www/dns-portal/js/app.js ]]; then
-  SAFE_NAME=$(echo "$COMPANY_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-' | cut -c1-32)
-  sed -i "s|provider-blocked-domains|${SAFE_NAME:-provider}-blocked-domains|g" /var/www/dns-portal/js/app.js || true
-  sed -i "s|Provider Name|$COMPANY_NAME|g; s|JD Telecom|$COMPANY_NAME|g" /var/www/dns-portal/js/app.js || true
-fi
-
-chown -R www-data:www-data /var/www/dns-portal /var/www/dns-blockpage
+export IPV6_LISTEN_80 IPV6_LISTEN_443 IPV6_LISTEN_80_DEFAULT IPV6_LISTEN_443_DEFAULT
 
 # --- Certificados ---
 mkdir -p /etc/nginx/ssl
@@ -125,57 +106,223 @@ fi
 PORTAL_CERT="/etc/nginx/ssl/portal.crt"
 PORTAL_KEY="/etc/nginx/ssl/portal.key"
 if [[ "${ENABLE_LETSENCRYPT,,}" == "true" ]] && command -v certbot >/dev/null; then
-  systemctl reload nginx || true
+  systemctl reload nginx 2>/dev/null || true
   certbot certonly --webroot -w /var/www/letsencrypt \
     -d "$DNS_FQDN" --email "${LETSENCRYPT_EMAIL:-admin@$DNS_FQDN}" \
-    --agree-tos --non-interactive || log "WARN: certbot falhou; mantendo autoassinado"
+    --agree-tos --non-interactive || log "WARN: certbot falhou"
   if [[ -f "/etc/letsencrypt/live/$DNS_FQDN/fullchain.pem" ]]; then
     PORTAL_CERT="/etc/letsencrypt/live/$DNS_FQDN/fullchain.pem"
     PORTAL_KEY="/etc/letsencrypt/live/$DNS_FQDN/privkey.pem"
   fi
 fi
-if [[ ! -f "$PORTAL_CERT" ]]; then
-  openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
-    -keyout "$PORTAL_KEY" -out "$PORTAL_CERT" \
-    -subj "/CN=$DNS_FQDN/O=$COMPANY_NAME" 2>/dev/null
+if [[ ! -f "$PORTAL_CERT" || "$PORTAL_CERT" == "/etc/nginx/ssl/portal.crt" ]]; then
+  if [[ ! -f /etc/nginx/ssl/portal.crt ]]; then
+    openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+      -keyout "$PORTAL_KEY" -out "$PORTAL_CERT" \
+      -subj "/CN=$DNS_FQDN/O=$COMPANY_NAME" 2>/dev/null
+  fi
+  PORTAL_CERT="/etc/nginx/ssl/portal.crt"
+  PORTAL_KEY="/etc/nginx/ssl/portal.key"
 fi
-# injeta paths reais no site portal
-sed -i \
-  -e "s|{{PORTAL_CERT}}|$PORTAL_CERT|g" \
-  -e "s|{{PORTAL_KEY}}|$PORTAL_KEY|g" \
-  /etc/nginx/sites-available/dns-portal
+export PORTAL_CERT PORTAL_KEY
+
+# --- Nginx geo allow for mgmt ---
+MGMT_GEO=$(cidrs_to_nginx_geo "${MGMT_CIDRS:-127.0.0.1/32}")
+[[ -n "$MGMT_GEO" ]] || MGMT_GEO="    127.0.0.1/32 1;"
+export MGMT_ALLOW="$MGMT_GEO"
+
+render_template "$TMPL_DIR/nginx-portal.conf.tmpl" /etc/nginx/sites-available/dns-portal
+render_template "$TMPL_DIR/nginx-blockpage.conf.tmpl" /etc/nginx/sites-available/dns-blockpage
+# Inject geo block into portal (prepend)
+{
+  echo "geo \$dns_mgmt_ok {"
+  echo "    default 0;"
+  echo "$MGMT_GEO"
+  echo "}"
+  echo
+  cat /etc/nginx/sites-available/dns-portal
+} > /tmp/dns-portal.conf
+mv /tmp/dns-portal.conf /etc/nginx/sites-available/dns-portal
+
+ln -sfn /etc/nginx/sites-available/dns-portal /etc/nginx/sites-enabled/dns-portal
+ln -sfn /etc/nginx/sites-available/dns-blockpage /etc/nginx/sites-enabled/dns-blockpage
+rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/jd-blockpage
+
+# DoH location if enabled (nginx reverse to Technitium DoH if present, else stub)
+if [[ "${ENABLE_DOH,,}" == "true" ]]; then
+  if ! grep -q 'location /dns-query' /etc/nginx/sites-available/dns-portal; then
+    python3 - <<'PY'
+from pathlib import Path
+p = Path('/etc/nginx/sites-available/dns-portal')
+t = p.read_text()
+snippet = '''
+    location /dns-query {
+        limit_req zone=doh burst=40 nodelay;
+        proxy_pass http://127.0.0.1:5380/dns-query;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+'''
+    if 'location /dns-query' not in t:
+        t = t.replace('location /portal/', snippet + '\n    location /portal/', 1)
+        if 'limit_req_zone' not in t:
+            t = 'limit_req_zone $binary_remote_addr zone=doh:10m rate=20r/s;\n' + t
+        p.write_text(t)
+PY
+  fi
+fi
 
 nginx -t && systemctl reload nginx
 
-# --- Technitium: CustomAddress + domínio ---
+# --- nftables ---
+if [[ -f "$TMPL_DIR/nftables.conf.tmpl" ]]; then
+  render_template "$TMPL_DIR/nftables.conf.tmpl" /etc/nftables.conf
+  # Expand CLIENT accept comments into actual rules file via python
+  python3 - <<PY
+from pathlib import Path
+cidrs = [c.strip() for c in "${CLIENT_CIDRS}".split(',') if c.strip()]
+mgmt = [c.strip() for c in "${MGMT_CIDRS}".split(',') if c.strip()]
+dot = "${ENABLE_DOT}".lower() == "true"
+text = Path('/etc/nftables.conf').read_text()
+client_rules = []
+for c in cidrs:
+    if ':' in c:
+        client_rules.append(f'    ip6 saddr {c} udp dport 53 accept')
+        client_rules.append(f'    ip6 saddr {c} tcp dport 53 accept')
+        if dot:
+            client_rules.append(f'    ip6 saddr {c} tcp dport 853 accept')
+    else:
+        client_rules.append(f'    ip saddr {c} udp dport 53 accept')
+        client_rules.append(f'    ip saddr {c} tcp dport 53 accept')
+        if dot:
+            client_rules.append(f'    ip saddr {c} tcp dport 853 accept')
+mgmt_rules = []
+for c in mgmt or ['127.0.0.1/32']:
+    if ':' in c:
+        mgmt_rules.append(f'    ip6 saddr {c} tcp dport {{ 22, 80, 443 }} accept')
+    else:
+        mgmt_rules.append(f'    ip saddr {c} tcp dport {{ 22, 80, 443 }} accept')
+# always allow localhost mgmt
+mgmt_rules.append('    ip saddr 127.0.0.1 tcp dport { 22, 80, 443 } accept')
+text = text.replace('{{CLIENT_DNS_RULES}}', '\n'.join(client_rules) or '    # no CLIENT_CIDRS — DNS fechado')
+text = text.replace('{{MGMT_RULES}}', '\n'.join(mgmt_rules))
+# portal HTTP/HTTPS: allow world for ACME+portal auth, admin filtered in nginx
+text = text.replace('{{PUBLIC_WEB_RULES}}', '    tcp dport { 80, 443 } accept')
+Path('/etc/nftables.conf').write_text(text)
+PY
+  systemctl enable nftables
+  nft -f /etc/nftables.conf || log "WARN: nftables apply falhou"
+fi
+
+# --- Query log retention ---
+QL_DIR='/etc/dns/apps/Query Logs (Sqlite)'
+if [[ -d "$QL_DIR" ]]; then
+  cat > "$QL_DIR/dnsApp.config" <<EOF
+{"enableLogging":true,"maxQueueSize":500000,"maxLogDays":${QUERYLOG_MAX_DAYS},"maxLogRecords":${QUERYLOG_MAX_RECORDS},"enableVacuum":false,"useInMemoryDb":false,"sqliteDbPath":"querylogs.db","connectionString":"Data Source='{sqliteDbPath}'; Cache=Shared;"}
+EOF
+  chown -R dns-server:dns-server "$QL_DIR" 2>/dev/null || true
+fi
+
+# --- Technitium settings ---
 if systemctl is-active --quiet dns; then
-  # Login e configura via API HTTP local
-  TOKEN=""
-  LOGIN=$(curl -sS "http://127.0.0.1:5380/api/user/login?user=${ADMIN_USER}&pass=${ADMIN_PASSWORD}" || true)
-  TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token') or d.get('response',{}).get('token',''))" 2>/dev/null || true)
-  if [[ -z "$TOKEN" ]]; then
-    # tenta criar/reset via API create (primeira instalação)
-    curl -sS "http://127.0.0.1:5380/api/user/create?user=${ADMIN_USER}&pass=${ADMIN_PASSWORD}" >/dev/null || true
-    LOGIN=$(curl -sS "http://127.0.0.1:5380/api/user/login?user=${ADMIN_USER}&pass=${ADMIN_PASSWORD}" || true)
-    TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token') or d.get('response',{}).get('token',''))" 2>/dev/null || true)
-  fi
+  TOKEN=$(technitium_token)
   if [[ -n "$TOKEN" ]]; then
-    ADDRS="$IPV4_HOST"
-    if [[ -n "${IPV6_ADDRESS:-}" ]]; then
-      ADDRS="$IPV4_HOST,${IPV6_ADDRESS%%/*}"
+    # Prefer POST with form body (token not only in query)
+    curl -sS -X POST "http://127.0.0.1:5380/api/settings/set" \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      --data-urlencode "token=$TOKEN" \
+      --data-urlencode "dnsServerDomain=$DNS_FQDN" \
+      --data-urlencode "enableBlocking=true" \
+      --data-urlencode "blockingType=CustomAddress" \
+      --data-urlencode "customBlockingAddresses=$VIP_HOST" \
+      --data-urlencode "dnssecValidation=${ENABLE_DNSSEC_VALIDATION}" \
+      >/dev/null || true
+
+    # Recursion ACL — try common parameter names
+    if [[ -n "${CLIENT_CIDRS:-}" ]]; then
+      curl -sS -X POST "http://127.0.0.1:5380/api/settings/set" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        --data-urlencode "token=$TOKEN" \
+        --data-urlencode "allowRecursion=true" \
+        --data-urlencode "recursionAllowedNetworks=${CLIENT_CIDRS}" \
+        --data-urlencode "allowedNetworks=${CLIENT_CIDRS}" \
+        >/dev/null || log "WARN: não foi possível aplicar recursionAllowedNetworks via API (verifique no /admin)"
     fi
-    curl -sS "http://127.0.0.1:5380/api/settings/set?token=$TOKEN&dnsServerDomain=$DNS_FQDN&enableBlocking=true&blockingType=CustomAddress&customBlockingAddresses=$ADDRS" >/dev/null || true
-    # Query Logs app — tenta instalar/ativar se API existir
-    curl -sS "http://127.0.0.1:5380/api/apps/list?token=$TOKEN" >/dev/null || true
-    log "Technitium settings atualizados (blocking CustomAddress → $ADDRS)"
+
+    # Enable DoT if supported
+    if [[ "${ENABLE_DOT,,}" == "true" ]]; then
+      curl -sS -X POST "http://127.0.0.1:5380/api/settings/set" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        --data-urlencode "token=$TOKEN" \
+        --data-urlencode "enableDnsOverTls=true" \
+        --data-urlencode "dnsOverTlsPort=853" \
+        >/dev/null || true
+    fi
+    if [[ "${ENABLE_DOH,,}" == "true" ]]; then
+      curl -sS -X POST "http://127.0.0.1:5380/api/settings/set" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        --data-urlencode "token=$TOKEN" \
+        --data-urlencode "enableDnsOverHttp=true" \
+        >/dev/null || true
+    fi
+    log "Technitium atualizado (CustomAddress→$VIP_HOST)"
   else
-    log "WARN: não foi possível autenticar na API Technitium; configure blocking manualmente em /admin/"
+    log "WARN: autenticação Technitium falhou"
   fi
 fi
 
+# --- HA keepalived / FRR ---
+if [[ "${DEPLOY_MODE}" == "cluster" ]]; then
+  [[ -n "${VIP_ADDRESS:-}" ]] || die "VIP_ADDRESS obrigatório em modo cluster"
+  [[ -n "${CLUSTER_SECRET:-}" ]] || die "CLUSTER_SECRET obrigatório em modo cluster"
+  if [[ "${HA_MODE}" == "keepalived" ]] || [[ "${HA_MODE}" == "bgp" ]]; then
+    bash "$APPLIANCE_ROOT/bin/dns-ha-configure" || log "WARN: dns-ha-configure falhou"
+  fi
+  systemctl enable --now dns-appliance-sync.timer 2>/dev/null || true
+fi
+
+# --- Feeds ---
+if [[ "${ENABLE_THREAT_FEEDS,,}" == "true" ]]; then
+  systemctl enable --now dns-feed-update.timer 2>/dev/null || true
+fi
+
+# --- Health ---
+systemctl enable --now dns-appliance-health.timer 2>/dev/null || true
+
+# --- OS admin password hint file (wizard may have set) ---
 echo "$DNS_FQDN" > "$STATE_DIR/configured-fqdn"
 echo "$IPV4_HOST" > "$STATE_DIR/configured-ip"
+echo "$VIP_HOST" > "$STATE_DIR/configured-vip"
 date -Is > "$STATE_DIR/last-apply"
 touch "$STATE_DIR/configured"
+
+# Runtime info for portal
+python3 - <<PY
+import json
+from pathlib import Path
+Path('/var/www/dns-portal/runtime.json').write_text(json.dumps({
+  "company": """${COMPANY_NAME}""",
+  "fqdn": "${DNS_FQDN}",
+  "vip": "${VIP_HOST}",
+  "nodeIp": "${IPV4_HOST}",
+  "deployMode": "${DEPLOY_MODE}",
+  "haMode": "${HA_MODE}",
+  "clusterNode": "${CLUSTER_NODE}",
+  "clientCidrs": "${CLIENT_CIDRS}",
+  "mgmtCidrs": "${MGMT_CIDRS}",
+  "enableDot": "${ENABLE_DOT}".lower()=="true",
+  "enableDoh": "${ENABLE_DOH}".lower()=="true",
+  "dohUrl": f"https://${DNS_FQDN}/dns-query",
+  "dotHost": "${DNS_FQDN}",
+  "brandPrimary": "${BRAND_PRIMARY}",
+  "supportPhone": """${SUPPORT_PHONE}""",
+  "supportUrl": """${SUPPORT_URL}""",
+  "supportEmail": """${SUPPORT_EMAIL}""",
+}, indent=2))
+PY
+chown -R www-data:www-data /var/www/dns-portal /var/www/dns-blockpage
+
 log "Configuração aplicada com sucesso"
-echo "OK — Portal: https://$DNS_FQDN/portal/  Admin: https://$DNS_FQDN/admin/"
+echo "OK — Portal: https://$DNS_FQDN/portal/  DNS VIP: $VIP_HOST  Admin (MGMT only): https://$DNS_FQDN/admin/"

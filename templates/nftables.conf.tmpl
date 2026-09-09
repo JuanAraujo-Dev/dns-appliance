@@ -1,0 +1,30 @@
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    ct state established,related accept
+    iif lo accept
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
+
+    # Gestão (SSH + web admin origin) — expandido por dns-apply-config
+{{MGMT_RULES}}
+
+    # Portal / ACME públicos
+{{PUBLIC_WEB_RULES}}
+
+    # DNS apenas de CLIENT_CIDRS (+ DoT 853)
+{{CLIENT_DNS_RULES}}
+
+    # Sync agent cluster (peer)
+    tcp dport 5389 accept
+  }
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+  }
+  chain output {
+    type filter hook output priority 0; policy accept;
+  }
+}

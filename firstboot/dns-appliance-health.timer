@@ -1,0 +1,11 @@
+[Unit]
+Description=DNS Appliance health timer
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=dns-appliance-health.service
+
+[Install]
+WantedBy=timers.target

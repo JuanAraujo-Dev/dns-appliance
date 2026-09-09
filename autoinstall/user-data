@@ -1,5 +1,5 @@
-# cloud-config
-# Ubuntu 24.04 Autoinstall — DNS Appliance (Technitium + portal + blockpage)
+#cloud-config
+# Ubuntu 24.04 Autoinstall — DNS Appliance v2
 autoinstall:
   version: 1
   locale: pt_BR.UTF-8
@@ -8,7 +8,7 @@ autoinstall:
   identity:
     hostname: dns01
     username: dnsadmin
-    # Senha inicial do SO: Mudar@123 — troque no wizard / primeiro login
+    # Senha SO inicial: troque obrigatoriamente no wizard (dns-firstboot)
     password: "$6$jkIdjRoC63rLusJj$Zy7XHeUvLzuPr1HRgvN7a.uGIBrhE0iJBYK1Wy06Bco5TGpd84vGEDWCEifzWSwaxj807UpwrCtl21j/KGh810"
   ssh:
     install-server: true
@@ -29,14 +29,17 @@ autoinstall:
     - jq
     - unzip
     - dnsutils
+    - keepalived
+    - python3
+    - rsync
   user-data:
     disable_root: false
     timezone: America/Sao_Paulo
     runcmd:
-      - [ bash, -lc, "systemctl enable dns-firstboot.service || true" ]
+      - [ bash, -lc, "systemctl enable dns-firstboot.service" ]
   late-commands:
     - curtin in-target --target=/target -- bash -c "mkdir -p /opt/dns-appliance-src"
     - cp -a /cdrom/dns-appliance/. /target/opt/dns-appliance-src/
-    - curtin in-target --target=/target -- bash -c "chmod +x /opt/dns-appliance-src/install/*.sh /opt/dns-appliance-src/overlay/opt/dns-appliance/bin/* || true"
-    - curtin in-target --target=/target -- bash -c "bash /opt/dns-appliance-src/install/install-all.sh >> /var/log/dns-appliance-install.log 2>&1 || true"
-    - curtin in-target --target=/target -- bash -c "systemctl enable dns-firstboot.service || true"
+    - curtin in-target --target=/target -- bash -c "chmod +x /opt/dns-appliance-src/install/*.sh /opt/dns-appliance-src/overlay/opt/dns-appliance/bin/*"
+    - curtin in-target --target=/target -- bash -c "bash /opt/dns-appliance-src/install/install-all.sh >> /var/log/dns-appliance-install.log 2>&1"
+    - curtin in-target --target=/target -- bash -c "systemctl enable dns-firstboot.service"
