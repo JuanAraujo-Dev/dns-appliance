@@ -1,18 +1,18 @@
 #!/bin/bash
-# Gera ISO Ubuntu 24.04 Autoinstall com a JD DNS Appliance embutida.
+# Gera ISO Ubuntu 24.04 Autoinstall com a DNS Appliance embutida.
 # Execute em Linux (Debian/Ubuntu) com ~5GB livres.
 #
 # Uso:
 #   sudo bash autoinstall/build-iso.sh
 #   sudo bash autoinstall/build-iso.sh /caminho/ubuntu-24.04.x-live-server-amd64.iso
 #
-# Saída: dist/jd-dns-appliance-ubuntu2404.iso
+# Saída: dist/dns-appliance-ubuntu2404.iso
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WORKDIR="${WORKDIR:-/tmp/jd-dns-iso-build}"
+WORKDIR="${WORKDIR:-/tmp/dns-iso-build}"
 OUTDIR="$ROOT/dist"
-OUT_ISO="$OUTDIR/jd-dns-appliance-ubuntu2404.iso"
+OUT_ISO="$OUTDIR/dns-appliance-ubuntu2404.iso"
 BASE_ISO="${1:-}"
 
 need() { command -v "$1" >/dev/null || { echo "Instale: $1"; exit 1; }; }
@@ -49,11 +49,11 @@ echo "Extraindo ISO base..."
 rsync -a extract/ iso/
 
 # Autoinstall + appliance payload
-mkdir -p iso/nocloud iso/jd-dns-appliance
+mkdir -p iso/nocloud iso/dns-appliance
 cp -f "$ROOT/autoinstall/user-data" iso/nocloud/user-data
 cp -f "$ROOT/autoinstall/meta-data" iso/nocloud/meta-data
 # cloud-init exige user-data sem comentário quebrado — ok
-rsync -a --exclude dist --exclude '.git' "$ROOT/" iso/jd-dns-appliance/
+rsync -a --exclude dist --exclude '.git' "$ROOT/" iso/dns-appliance/
 
 # GRUB: autoinstall via nocloud na mídia
 GRUB_CFG="iso/boot/grub/grub.cfg"

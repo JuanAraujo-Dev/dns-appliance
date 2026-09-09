@@ -1,4 +1,4 @@
-# JD DNS Appliance
+# DNS Appliance
 
 Appliance **DNS completa** para provedores ISP: Technitium DNS Server + portal de gestão + página de bloqueio + segurança, pronta para instalar no **Proxmox**.
 
@@ -76,8 +76,8 @@ No primeiro boot (ou via wizard depois) você altera:
 ### 3.1 Clonar este repositório
 
 ```bash
-git clone https://github.com/JuanAraujo-Dev/jd-dns-appliance.git
-cd jd-dns-appliance
+git clone https://github.com/JuanAraujo-Dev/dns-appliance.git
+cd dns-appliance
 ```
 
 ### 3.2 Gerar a ISO
@@ -89,7 +89,7 @@ sudo bash autoinstall/build-iso.sh
 Saída esperada:
 
 ```text
-dist/jd-dns-appliance-ubuntu2404.iso
+dist/dns-appliance-ubuntu2404.iso
 ```
 
 ### 3.3 Enviar a ISO para o Proxmox
@@ -97,12 +97,12 @@ dist/jd-dns-appliance-ubuntu2404.iso
 Pelo painel web:
 
 1. **Datacenter → Storage (ex.: local) → ISO Images → Upload**
-2. Selecione `jd-dns-appliance-ubuntu2404.iso`
+2. Selecione `dns-appliance-ubuntu2404.iso`
 
 Ou via SCP (no nó Proxmox):
 
 ```bash
-scp dist/jd-dns-appliance-ubuntu2404.iso root@PROXMOX:/var/lib/vz/template/iso/
+scp dist/dns-appliance-ubuntu2404.iso root@PROXMOX:/var/lib/vz/template/iso/
 ```
 
 ### 3.4 Criar a VM
@@ -110,7 +110,7 @@ scp dist/jd-dns-appliance-ubuntu2404.iso root@PROXMOX:/var/lib/vz/template/iso/
 No Proxmox → **Create VM**:
 
 1. **General:** nome (ex.: `dns01`), ID livre  
-2. **OS:** Linux 6.x / Ubuntu 24.04 — ISO: `jd-dns-appliance-ubuntu2404.iso`  
+2. **OS:** Linux 6.x / Ubuntu 24.04 — ISO: `dns-appliance-ubuntu2404.iso`  
 3. **System:** defaults (QEMU Agent opcional)  
 4. **Disks:** ≥ 32 GB, preferencialmente em storage SSD  
 5. **CPU:** ≥ 2 sockets/cores  
@@ -131,7 +131,7 @@ No Proxmox → **Create VM**:
 3. O first-boot wizard deve iniciar sozinho; se não:
 
 ```bash
-sudo jd-dns-firstboot
+sudo dns-firstboot
 ```
 
 Preencha:
@@ -179,20 +179,20 @@ Instale Ubuntu Server 24.04 normalmente (ou cloud-init). Garanta rede e SSH.
 Do seu PC (com o clone do repo):
 
 ```bash
-scp -r jd-dns-appliance root@IP_DA_VM:/opt/jd-dns-appliance-src
+scp -r dns-appliance root@IP_DA_VM:/opt/dns-appliance-src
 ssh root@IP_DA_VM
-cd /opt/jd-dns-appliance-src
+cd /opt/dns-appliance-src
 bash install/install-all.sh
-jd-dns-firstboot
+dns-firstboot
 ```
 
 Ou só com git na VM:
 
 ```bash
 apt update && apt install -y git
-git clone https://github.com/JuanAraujo-Dev/jd-dns-appliance.git /opt/jd-dns-appliance-src
-bash /opt/jd-dns-appliance-src/install/install-all.sh
-jd-dns-firstboot
+git clone https://github.com/JuanAraujo-Dev/dns-appliance.git /opt/dns-appliance-src
+bash /opt/dns-appliance-src/install/install-all.sh
+dns-firstboot
 ```
 
 Siga o mesmo [wizard](#5-wizard-de-configuração) e o [DNS externo](#37-dns-externo).
@@ -201,7 +201,7 @@ Siga o mesmo [wizard](#5-wizard-de-configuração) e o [DNS externo](#37-dns-ext
 
 ## 5. Wizard de configuração
 
-O wizard grava `/etc/jd-dns-appliance.env` e aplica:
+O wizard grava `/etc/dns-appliance.env` e aplica:
 
 - Hostname / FQDN  
 - Endereço de rede  
@@ -214,9 +214,9 @@ O wizard grava `/etc/jd-dns-appliance.env` e aplica:
 Comandos:
 
 ```bash
-jd-dns-firstboot              # primeira vez / interativo
-jd-dns-firstboot --force      # repetir wizard completo
-jd-dns-apply-config           # reaplica a partir do .env atual
+dns-firstboot              # primeira vez / interativo
+dns-firstboot --force      # repetir wizard completo
+dns-apply-config           # reaplica a partir do .env atual
 ```
 
 Arquivo de exemplo no repo: [`config/appliance.env.example`](config/appliance.env.example).
@@ -233,7 +233,7 @@ Checklist rápido:
 4. [ ] Bloquear um domínio de teste no portal → **Bloqueios**  
 5. [ ] Confirmar que o cliente recebe a página de bloqueio  
 6. [ ] Revisar Fail2ban: `fail2ban-client status sshd`  
-7. [ ] Backup do `/etc/jd-dns-appliance.env` e do volume de dados do Technitium  
+7. [ ] Backup do `/etc/dns-appliance.env` e do volume de dados do Technitium  
 
 ---
 
@@ -242,21 +242,21 @@ Checklist rápido:
 ### Wizard completo de novo
 
 ```bash
-sudo jd-dns-firstboot --force
+sudo dns-firstboot --force
 ```
 
 ### Só editar e reaplicar
 
 ```bash
-sudo nano /etc/jd-dns-appliance.env
-sudo jd-dns-apply-config
+sudo nano /etc/dns-appliance.env
+sudo dns-apply-config
 ```
 
 ### Só trocar o logo
 
 ```bash
-sudo cp /caminho/novo-logo.png /opt/jd-dns-appliance/branding/logo.png
-sudo jd-dns-apply-config
+sudo cp /caminho/novo-logo.png /opt/dns-appliance/branding/logo.png
+sudo dns-apply-config
 ```
 
 Atualize o registro DNS externo se mudar o IP ou o FQDN.
@@ -287,12 +287,12 @@ Se o provedor tiver firewall externo (painel/cloud), libere as mesmas portas at�
 ## 10. Estrutura do repositório
 
 ```text
-jd-dns-appliance/
+dns-appliance/
 ├── autoinstall/          # user-data + build-iso.sh → gera a ISO
 ├── config/               # appliance.env.example
 ├── firstboot/            # unit systemd do wizard
 ├── install/              # 01-base … 04-security + install-all.sh
-├── overlay/              # portal, blockpage, bins (jd-dns-*)
+├── overlay/              # portal, blockpage, bins (dns-*)
 ├── templates/            # nginx portal/blockpage
 ├── proxmox/INSTALACAO.md # resumo Proxmox
 ├── pack.sh               # empacota tar.gz leve (sem ISO)
@@ -304,7 +304,7 @@ Pacote leve (sem ISO):
 
 ```bash
 bash pack.sh
-# → dist/jd-dns-appliance-VERSION.tar.gz
+# → dist/dns-appliance-VERSION.tar.gz
 ```
 
 ---
@@ -314,17 +314,17 @@ bash pack.sh
 | Problema | O que verificar |
 |----------|-----------------|
 | ISO reinstala em loop | Remova a ISO do Boot Order da VM |
-| Wizard não abre | `sudo systemctl status jd-dns-firstboot`; `sudo jd-dns-firstboot` |
+| Wizard não abre | `sudo systemctl status dns-firstboot`; `sudo dns-firstboot` |
 | Portal 502 | `systemctl status dns`; Nginx → Technitium `127.0.0.1:5380` |
 | Sem HTTPS / LE falha | FQDN aponta para o IP? Porta 80 aberta? |
 | DNS não responde | `ss -ulnp \| grep :53`; firewall do provedor liberando 53? |
-| Logo não aparece | PNG em `/opt/jd-dns-appliance/branding/logo.png` + `jd-dns-apply-config` |
+| Logo não aparece | PNG em `/opt/dns-appliance/branding/logo.png` + `dns-apply-config` |
 | Título “blocked” / CSS antigo | Hard refresh (Ctrl+Shift+R) no navegador |
 
 Logs úteis:
 
 ```bash
-journalctl -u dns -u nginx -u jd-dns-firstboot -e
+journalctl -u dns -u nginx -u dns-firstboot -e
 tail -f /var/log/nginx/error.log
 ```
 

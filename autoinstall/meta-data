@@ -1,2 +1,2 @@
-instance-id: jd-dns-appliance
+instance-id: dns-appliance
 local-hostname: dns01

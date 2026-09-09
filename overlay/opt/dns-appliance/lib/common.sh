@@ -1,13 +1,13 @@
 #!/bin/bash
-# Funções comuns da JD DNS Appliance
+# Funções comuns da DNS Appliance
 set -euo pipefail
 
-APPLIANCE_ROOT="${APPLIANCE_ROOT:-/opt/jd-dns-appliance}"
-ENV_FILE="${ENV_FILE:-/etc/jd-dns-appliance.env}"
+APPLIANCE_ROOT="${APPLIANCE_ROOT:-/opt/dns-appliance}"
+ENV_FILE="${ENV_FILE:-/etc/dns-appliance.env}"
 OVERLAY_SRC="${OVERLAY_SRC:-$APPLIANCE_ROOT/overlay}"
 TMPL_DIR="${TMPL_DIR:-$APPLIANCE_ROOT/templates}"
-STATE_DIR="/var/lib/jd-dns-appliance"
-LOG_FILE="/var/log/jd-dns-appliance.log"
+STATE_DIR="/var/lib/dns-appliance"
+LOG_FILE="/var/log/dns-appliance.log"
 
 log() { echo "[$(date -Is)] $*" | tee -a "$LOG_FILE"; }
 
@@ -28,7 +28,7 @@ load_env() {
   : "${HOSTNAME:=dns01}"
   : "${ADMIN_USER:=admin}"
   : "${ADMIN_PASSWORD:=Mudar@123}"
-  : "${LOGO_FILE:=/opt/jd-dns-appliance/branding/logo.png}"
+  : "${LOGO_FILE:=/opt/dns-appliance/branding/logo.png}"
   : "${ENABLE_LETSENCRYPT:=false}"
   : "${DNS_RESOLVERS:=1.1.1.1,8.8.8.8}"
   : "${QUERYLOG_MAX_DAYS:=30}"
@@ -70,6 +70,6 @@ render_template() {
 }
 
 ensure_dirs() {
-  mkdir -p "$STATE_DIR" /var/www/dns-portal /var/www/jd-blockpage /var/www/letsencrypt \
-    /etc/nginx/ssl /opt/jd-dns-appliance/branding
+  mkdir -p "$STATE_DIR" /var/www/dns-portal /var/www/dns-blockpage /var/www/letsencrypt \
+    /etc/nginx/ssl /opt/dns-appliance/branding
 }

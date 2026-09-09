@@ -419,7 +419,7 @@ function exportBlockedList() {
   const blob = new Blob([state.blockedDomains.join('\n') + (state.blockedDomains.length ? '\n' : '')], { type: 'text/plain' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'jdtelecom-blocked-domains.txt';
+  a.download = 'provider-blocked-domains.txt';
   a.click();
   URL.revokeObjectURL(a.href);
 }

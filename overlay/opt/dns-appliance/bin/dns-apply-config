@@ -2,7 +2,7 @@
 # Aplica IP, domínio, nome e logo na stack completa (Technitium + Nginx + portal + blockpage)
 set -euo pipefail
 
-APPLIANCE_ROOT="/opt/jd-dns-appliance"
+APPLIANCE_ROOT="/opt/dns-appliance"
 # shellcheck disable=SC1091
 source "$APPLIANCE_ROOT/lib/common.sh"
 
@@ -26,7 +26,7 @@ fi
 
 # --- Netplan ---
 RESOLVER_YAML=$(echo "$DNS_RESOLVERS" | tr ',' '\n' | sed 's/^/        - /')
-cat > /etc/netplan/01-jd-dns.yaml <<EOF
+cat > /etc/netplan/01-dns-appliance.yaml <<EOF
 network:
   version: 2
   ethernets:
@@ -47,15 +47,15 @@ cat <<E6
 E6
 fi)
 EOF
-chmod 600 /etc/netplan/01-jd-dns.yaml
+chmod 600 /etc/netplan/01-dns-appliance.yaml
 netplan apply || log "WARN: netplan apply falhou (pode ser normal em chroot)"
 
 # --- Logo ---
 if [[ -f "$LOGO_FILE" ]]; then
   cp -f "$LOGO_FILE" /var/www/dns-portal/assets/logo.png
-  cp -f "$LOGO_FILE" /var/www/jd-blockpage/logo.png
+  cp -f "$LOGO_FILE" /var/www/dns-blockpage/logo.png
   # compat paths usados pela blockpage antiga
-  cp -f "$LOGO_FILE" /var/www/jd-blockpage/jdtelecom-logo.png
+  cp -f "$LOGO_FILE" /var/www/dns-blockpage/logo.png
 fi
 
 # --- Templates Nginx ---
@@ -64,7 +64,7 @@ if [[ -n "${IPV6_ADDRESS:-}" ]]; then
   IPV6_HOST="${IPV6_ADDRESS%%/*}"
 fi
 render_template "$TMPL_DIR/nginx-portal.conf.tmpl" /etc/nginx/sites-available/dns-portal
-render_template "$TMPL_DIR/nginx-blockpage.conf.tmpl" /etc/nginx/sites-available/jd-blockpage
+render_template "$TMPL_DIR/nginx-blockpage.conf.tmpl" /etc/nginx/sites-available/dns-blockpage
 
 if [[ -n "$IPV6_HOST" ]]; then
   sed -i \
@@ -72,45 +72,46 @@ if [[ -n "$IPV6_HOST" ]]; then
     -e "s|{{IPV6_LISTEN_443}}|listen [$IPV6_HOST]:443 ssl;|g" \
     -e "s|{{IPV6_LISTEN_80_DEFAULT}}|listen [$IPV6_HOST]:80 default_server;|g" \
     -e "s|{{IPV6_LISTEN_443_DEFAULT}}|listen [$IPV6_HOST]:443 ssl default_server;|g" \
-    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/jd-blockpage
+    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/dns-blockpage
 else
   sed -i \
     -e "s|{{IPV6_LISTEN_80}}||g" \
     -e "s|{{IPV6_LISTEN_443}}||g" \
     -e "s|{{IPV6_LISTEN_80_DEFAULT}}||g" \
     -e "s|{{IPV6_LISTEN_443_DEFAULT}}||g" \
-    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/jd-blockpage
+    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/dns-blockpage
 fi
 
 ln -sfn /etc/nginx/sites-available/dns-portal /etc/nginx/sites-enabled/dns-portal
-ln -sfn /etc/nginx/sites-available/jd-blockpage /etc/nginx/sites-enabled/jd-blockpage
-rm -f /etc/nginx/sites-enabled/default
+ln -sfn /etc/nginx/sites-available/dns-blockpage /etc/nginx/sites-enabled/dns-blockpage
+rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/jd-blockpage
 
 # --- Branding no portal / blockpage ---
 if [[ -f /var/www/dns-portal/index.html ]]; then
-  # substitui placeholders se existirem; senão faz replace genérico de textos JD
   sed -i \
     -e "s|{{COMPANY_NAME}}|$COMPANY_NAME|g" \
     -e "s|{{DNS_FQDN}}|$DNS_FQDN|g" \
+    -e "s|Provider Name|$COMPANY_NAME|g" \
+    -e "s|dns\\.example\\.com|$DNS_FQDN|g" \
     -e "s|JD Telecom|$COMPANY_NAME|g" \
     -e "s|dns01\\.jdtelecom\\.com\\.br|$DNS_FQDN|g" \
     /var/www/dns-portal/index.html || true
 fi
-if [[ -f /var/www/jd-blockpage/index.html ]]; then
+if [[ -f /var/www/dns-blockpage/index.html ]]; then
   sed -i \
     -e "s|{{COMPANY_NAME}}|$COMPANY_NAME|g" \
     -e "s|{{DNS_FQDN}}|$DNS_FQDN|g" \
+    -e "s|Provider Name|$COMPANY_NAME|g" \
     -e "s|JD Telecom|$COMPANY_NAME|g" \
-    -e "s|/jdtelecom-logo\\.png|/logo.png|g" \
-    /var/www/jd-blockpage/index.html || true
+    /var/www/dns-blockpage/index.html || true
 fi
 if [[ -f /var/www/dns-portal/js/app.js ]]; then
   SAFE_NAME=$(echo "$COMPANY_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-' | cut -c1-32)
-  sed -i "s|jdtelecom-blocked-domains|${SAFE_NAME:-provider}-blocked-domains|g" /var/www/dns-portal/js/app.js || true
-  sed -i "s|JD Telecom|$COMPANY_NAME|g" /var/www/dns-portal/js/app.js || true
+  sed -i "s|provider-blocked-domains|${SAFE_NAME:-provider}-blocked-domains|g" /var/www/dns-portal/js/app.js || true
+  sed -i "s|Provider Name|$COMPANY_NAME|g; s|JD Telecom|$COMPANY_NAME|g" /var/www/dns-portal/js/app.js || true
 fi
 
-chown -R www-data:www-data /var/www/dns-portal /var/www/jd-blockpage
+chown -R www-data:www-data /var/www/dns-portal /var/www/dns-blockpage
 
 # --- Certificados ---
 mkdir -p /etc/nginx/ssl

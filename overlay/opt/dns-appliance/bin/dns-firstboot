@@ -2,16 +2,16 @@
 # Wizard interativo de primeiro boot (console Proxmox / SSH)
 set -euo pipefail
 
-APPLIANCE_ROOT="/opt/jd-dns-appliance"
+APPLIANCE_ROOT="/opt/dns-appliance"
 # shellcheck disable=SC1091
 source "$APPLIANCE_ROOT/lib/common.sh"
 
 require_root
-STATE_DIR="/var/lib/jd-dns-appliance"
-mkdir -p "$STATE_DIR" /opt/jd-dns-appliance/branding
+STATE_DIR="/var/lib/dns-appliance"
+mkdir -p "$STATE_DIR" /opt/dns-appliance/branding
 
 if [[ -f "$STATE_DIR/configured" ]] && [[ "${1:-}" != "--force" ]]; then
-  echo "Appliance já configurada. Use: jd-dns-firstboot --force"
+  echo "Appliance já configurada. Use: dns-firstboot --force"
   exit 0
 fi
 
@@ -53,7 +53,7 @@ IFACE_DEF=$(detect_iface || true)
 
 clear
 echo "=============================================="
-echo "  JD DNS Appliance — configuração inicial"
+echo "  DNS Appliance — configuração inicial"
 echo "  Stack: Technitium + Portal + Blockpage"
 echo "=============================================="
 echo
@@ -71,8 +71,8 @@ ADMIN_PASSWORD=$(ask_password "Senha admin (será usada no portal)")
 [[ -n "$ADMIN_PASSWORD" ]] || ADMIN_PASSWORD="Mudar@123"
 
 LOGO_SRC=""
-if yesno "Deseja informar caminho de um arquivo de logo PNG agora?\n(depois pode copiar para /opt/jd-dns-appliance/branding/logo.png)"; then
-  LOGO_SRC=$(ask "Caminho do PNG no disco" "/opt/jd-dns-appliance/branding/logo.png")
+if yesno "Deseja informar caminho de um arquivo de logo PNG agora?\n(depois pode copiar para /opt/dns-appliance/branding/logo.png)"; then
+  LOGO_SRC=$(ask "Caminho do PNG no disco" "/opt/dns-appliance/branding/logo.png")
 fi
 
 ENABLE_LETSENCRYPT="false"
@@ -82,7 +82,7 @@ if yesno "Usar Let's Encrypt para HTTPS do portal?\n(requer DNS do FQDN apontand
   LETSENCRYPT_EMAIL=$(ask "E-mail Let's Encrypt" "noc@$DNS_FQDN")
 fi
 
-LOGO_FILE="/opt/jd-dns-appliance/branding/logo.png"
+LOGO_FILE="/opt/dns-appliance/branding/logo.png"
 if [[ -n "$LOGO_SRC" && -f "$LOGO_SRC" ]]; then
   cp -f "$LOGO_SRC" "$LOGO_FILE"
 elif [[ ! -f "$LOGO_FILE" ]]; then
@@ -90,7 +90,7 @@ elif [[ ! -f "$LOGO_FILE" ]]; then
   [[ -f /var/www/dns-portal/assets/logo.png ]] && cp -f /var/www/dns-portal/assets/logo.png "$LOGO_FILE" || true
 fi
 
-cat > /etc/jd-dns-appliance.env <<EOF
+cat > /etc/dns-appliance.env <<EOF
 COMPANY_NAME="$COMPANY_NAME"
 DNS_FQDN="$DNS_FQDN"
 HOSTNAME="$HOSTNAME"
@@ -108,17 +108,17 @@ LETSENCRYPT_EMAIL="$LETSENCRYPT_EMAIL"
 QUERYLOG_MAX_DAYS="30"
 QUERYLOG_MAX_RECORDS="1000000"
 EOF
-chmod 600 /etc/jd-dns-appliance.env
+chmod 600 /etc/dns-appliance.env
 
 echo
 echo "Aplicando configuração..."
-"$APPLIANCE_ROOT/bin/jd-dns-apply-config"
+"$APPLIANCE_ROOT/bin/dns-apply-config"
 
-systemctl disable jd-dns-firstboot.service 2>/dev/null || true
+systemctl disable dns-firstboot.service 2>/dev/null || true
 echo
 echo "Pronto."
 echo "  Portal:  https://$DNS_FQDN/portal/"
 echo "  Admin:   https://$DNS_FQDN/admin/"
 echo "  Usuário: $ADMIN_USER"
 echo
-echo "Para reconfigurar depois: jd-dns-firstboot --force"
+echo "Para reconfigurar depois: dns-firstboot --force"

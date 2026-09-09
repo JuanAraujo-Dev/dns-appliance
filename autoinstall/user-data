@@ -1,5 +1,5 @@
 # cloud-config
-# Ubuntu 24.04 Autoinstall — JD DNS Appliance (Technitium + portal + blockpage)
+# Ubuntu 24.04 Autoinstall — DNS Appliance (Technitium + portal + blockpage)
 autoinstall:
   version: 1
   locale: pt_BR.UTF-8
@@ -33,10 +33,10 @@ autoinstall:
     disable_root: false
     timezone: America/Sao_Paulo
     runcmd:
-      - [ bash, -lc, "systemctl enable jd-dns-firstboot.service || true" ]
+      - [ bash, -lc, "systemctl enable dns-firstboot.service || true" ]
   late-commands:
-    - curtin in-target --target=/target -- bash -c "mkdir -p /opt/jd-dns-appliance-src"
-    - cp -a /cdrom/jd-dns-appliance/. /target/opt/jd-dns-appliance-src/
-    - curtin in-target --target=/target -- bash -c "chmod +x /opt/jd-dns-appliance-src/install/*.sh /opt/jd-dns-appliance-src/overlay/opt/jd-dns-appliance/bin/* || true"
-    - curtin in-target --target=/target -- bash -c "bash /opt/jd-dns-appliance-src/install/install-all.sh >> /var/log/jd-dns-install.log 2>&1 || true"
-    - curtin in-target --target=/target -- bash -c "systemctl enable jd-dns-firstboot.service || true"
+    - curtin in-target --target=/target -- bash -c "mkdir -p /opt/dns-appliance-src"
+    - cp -a /cdrom/dns-appliance/. /target/opt/dns-appliance-src/
+    - curtin in-target --target=/target -- bash -c "chmod +x /opt/dns-appliance-src/install/*.sh /opt/dns-appliance-src/overlay/opt/dns-appliance/bin/* || true"
+    - curtin in-target --target=/target -- bash -c "bash /opt/dns-appliance-src/install/install-all.sh >> /var/log/dns-appliance-install.log 2>&1 || true"
+    - curtin in-target --target=/target -- bash -c "systemctl enable dns-firstboot.service || true"

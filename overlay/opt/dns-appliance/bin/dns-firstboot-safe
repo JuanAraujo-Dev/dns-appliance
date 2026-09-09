@@ -2,7 +2,7 @@
 # Wrapper: se não houver TTY, grava env mínimo e aplica (útil em cloud-init)
 set -euo pipefail
 if [[ ! -t 0 ]] && [[ "${1:-}" != "--force" ]]; then
-  echo "Sem TTY — pulando wizard interativo. Configure com: jd-dns-firstboot --force"
+  echo "Sem TTY — pulando wizard interativo. Configure com: dns-firstboot --force"
   exit 0
 fi
-exec /opt/jd-dns-appliance/bin/jd-dns-firstboot "$@"
+exec /opt/dns-appliance/bin/dns-firstboot "$@"

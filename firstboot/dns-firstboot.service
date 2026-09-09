@@ -1,13 +1,13 @@
 [Unit]
-Description=JD DNS Appliance first-boot wizard
+Description=DNS Appliance first-boot wizard
 After=network-online.target multi-user.target
 Wants=network-online.target
-ConditionPathExists=!/var/lib/jd-dns-appliance/configured
+ConditionPathExists=!/var/lib/dns-appliance/configured
 
 [Service]
 Type=oneshot
-# Roda no console gráfico/VNC do Proxmox (tty1). Se não houver TTY, use SSH: jd-dns-firstboot
-ExecStart=/opt/jd-dns-appliance/bin/jd-dns-firstboot
+# Roda no console gráfico/VNC do Proxmox (tty1). Se não houver TTY, use SSH: dns-firstboot
+ExecStart=/opt/dns-appliance/bin/dns-firstboot
 StandardInput=tty-force
 StandardOutput=journal+console
 StandardError=journal+console

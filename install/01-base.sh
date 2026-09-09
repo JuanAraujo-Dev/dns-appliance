@@ -15,7 +15,7 @@ systemctl enable nginx nftables fail2ban
 systemctl start nftables || true
 
 # Fail2ban SSH
-cat >/etc/fail2ban/jail.d/jd-dns.conf <<'EOF'
+cat >/etc/fail2ban/jail.d/dns-appliance.conf <<'EOF'
 [DEFAULT]
 banaction = nftables
 banaction_allports = nftables[type=allports]
