@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#ff5a00">
+<base href="/portal/">
+<title>DNS Portal | JD Telecom</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/main.css?v=4">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+
+<!-- Login -->
+<div id="login-screen" class="login-screen hidden">
+  <div class="login-orb one"></div>
+  <div class="login-orb two"></div>
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-wrap logo-wrap--login">
+        <img src="assets/logo.png" alt="JD Telecom">
+      </div>
+      <div class="login-logo-text">
+        <h1>DNS Portal</h1>
+        <p>dns01.jdtelecom.com.br</p>
+      </div>
+    </div>
+    <div id="login-error" class="error-msg hidden"></div>
+    <form id="login-form">
+      <div class="form-group">
+        <label for="login-user">Usuário</label>
+        <input type="text" id="login-user" placeholder="admin" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label for="login-pass">Senha</label>
+        <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button type="submit" id="login-btn" class="btn btn-primary">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <div class="app-layout">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-wrap logo-wrap--sidebar">
+          <img src="assets/logo.png" alt="JD Telecom">
+        </div>
+        <div>
+          <h2>DNS Portal</h2>
+          <span>JD Telecom</span>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Dashboard
+        </button>
+        <button class="nav-item" data-view="logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          Logs de Consultas
+        </button>
+        <button class="nav-item" data-view="clients">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Top Clientes
+        </button>
+        <button class="nav-item" data-view="domains">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Top Domínios
+        </button>
+        <button class="nav-item" data-view="blocked">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          Bloqueios
+        </button>
+        <a href="/admin/" class="nav-item" style="text-decoration:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Admin Technitium
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <button id="logout-btn" class="btn btn-secondary btn-sm" style="width:100%">Sair</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="menu-toggle" class="menu-toggle">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div>
+            <h1 id="page-title">Dashboard</h1>
+            <p>dns01.jdtelecom.com.br · <span id="user-name">Admin</span></p>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="status-dot" title="Servidor online"></div>
+          <select id="period-select" class="period-select">
+            <option value="LastHour">Última Hora</option>
+            <option value="LastDay">Último Dia</option>
+            <option value="LastWeek">Última Semana</option>
+            <option value="LastMonth">Último Mês</option>
+          </select>
+          <select id="refresh-select" class="refresh-select">
+            <option value="15">↻ 15s</option>
+            <option value="30" selected>↻ 30s</option>
+            <option value="60">↻ 60s</option>
+            <option value="0">↻ Off</option>
+          </select>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <div id="view-dashboard" class="view">
+          <div id="stats-grid" class="stats-grid"></div>
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h3>Consultas por Minuto</h3>
+              <canvas id="mainChart" height="280"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Tipo de Resposta</h3>
+              <canvas id="responseChart" height="280"></canvas>
+            </div>
+          </div>
+          <div class="charts-row">
+            <div class="chart-card">
+              <h3>Tipo de Registro (QTYPE)</h3>
+              <canvas id="typeChart" height="200"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Protocolo</h3>
+              <canvas id="protocolChart" height="200"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Top Clientes</h3>
+              <ul id="top-clients-list" class="top-list"></ul>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-logs" class="view hidden">
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Logs de Consultas DNS</h3>
+              <div class="table-filters">
+                <input type="text" id="filter-client" placeholder="IP do cliente">
+                <input type="text" id="filter-domain" placeholder="Domínio (QNAME)">
+                <select id="filter-type">
+                  <option value="">Tipo resposta</option>
+                  <option value="Cached">Cached</option>
+                  <option value="Recursive">Recursive</option>
+                  <option value="Authoritative">Authoritative</option>
+                  <option value="Blocked">Blocked</option>
+                </select>
+                <select id="filter-rcode">
+                  <option value="">Código</option>
+                  <option value="NoError">NoError</option>
+                  <option value="NxDomain">NxDomain</option>
+                  <option value="ServerFailure">ServerFailure</option>
+                  <option value="Refused">Refused</option>
+                </select>
+                <button id="filter-btn" class="btn btn-primary btn-sm">Filtrar</button>
+                <button id="clear-filter-btn" class="btn btn-secondary btn-sm">Limpar</button>
+                <button id="export-btn" class="btn btn-secondary btn-sm">Exportar CSV</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data/Hora</th>
+                    <th>Cliente (IP)</th>
+                    <th>Domínio</th>
+                    <th>Tipo</th>
+                    <th>Resposta</th>
+                    <th>Código</th>
+                    <th>RTT</th>
+                    <th>Answer</th>
+                  </tr>
+                </thead>
+                <tbody id="logs-tbody"></tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <span id="logs-total">0 registros</span>
+              <div id="logs-pagination" class="pagination"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-clients" class="view hidden">
+          <div class="two-col">
+            <div class="table-card" style="padding:20px">
+              <h3 style="margin-bottom:16px">Top Clientes por Consultas</h3>
+              <ul id="top-clients-list-2" class="top-list"></ul>
+            </div>
+            <div class="chart-card">
+              <h3>Distribuição por Cliente</h3>
+              <canvas id="clientsChart" height="300"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-domains" class="view hidden">
+          <div class="two-col">
+            <div class="table-card" style="padding:20px">
+              <h3 style="margin-bottom:16px">Top Domínios Consultados</h3>
+              <ul id="top-domains-list-2" class="top-list"></ul>
+            </div>
+            <div class="chart-card">
+              <h3>Distribuição por Domínio</h3>
+              <canvas id="domainsChart" height="300"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-blocked" class="view hidden">
+          <div id="block-status" class="block-status"></div>
+          <div id="block-msg" class="block-msg hidden"></div>
+
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Domínios bloqueados</h3>
+              <div class="table-filters block-toolbar">
+                <input type="text" id="block-domain-input" placeholder="Novo domínio…">
+                <button id="block-add-btn" class="btn btn-primary btn-sm" type="button">Bloquear</button>
+                <span class="block-toolbar-divider" aria-hidden="true"></span>
+                <input type="text" id="block-search" placeholder="Filtrar lista…">
+                <button id="block-refresh-btn" class="btn btn-secondary btn-sm" type="button">Atualizar</button>
+                <button id="block-bulk-toggle" class="btn btn-secondary btn-sm" type="button">Importar lote</button>
+                <button id="block-export-btn" class="btn btn-secondary btn-sm" type="button">Exportar</button>
+              </div>
+            </div>
+            <div id="block-bulk-panel" class="block-bulk-panel hidden">
+              <label for="block-bulk-input">Um domínio por linha</label>
+              <textarea id="block-bulk-input" rows="4" placeholder="malware.exemplo.com&#10;ads.exemplo.com"></textarea>
+              <div class="block-bulk-actions">
+                <button id="block-import-btn" class="btn btn-primary btn-sm" type="button">Importar lista</button>
+                <button id="block-bulk-close" class="btn btn-secondary btn-sm" type="button">Fechar</button>
+                <span class="block-bulk-hint">Resposta: IP da página JD Telecom (CustomAddress)</span>
+              </div>
+            </div>
+            <div class="table-wrap block-list-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Domínio</th>
+                    <th>Ação</th>
+                  </tr>
+                </thead>
+                <tbody id="blocked-tbody"></tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <span id="blocked-total">0 domínios</span>
+            </div>
+          </div>
+
+          <div class="two-col" style="margin-top:16px">
+            <div class="chart-card">
+              <h3>Mais bloqueados no período</h3>
+              <ul id="top-blocked-list" class="top-list"></ul>
+            </div>
+            <div class="chart-card">
+              <h3>Exceções (permitidos)</h3>
+              <div class="block-allow-form">
+                <input type="text" id="allow-domain-input" placeholder="domínio liberado">
+                <button id="allow-add-btn" class="btn btn-secondary btn-sm" type="button">Permitir</button>
+              </div>
+              <ul id="allowed-list" class="top-list allowed-inline"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="js/app.js?v=4"></script>
+</body>
+</html>

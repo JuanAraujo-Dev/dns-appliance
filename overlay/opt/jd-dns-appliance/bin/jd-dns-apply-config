@@ -1,0 +1,180 @@
+#!/bin/bash
+# Aplica IP, domínio, nome e logo na stack completa (Technitium + Nginx + portal + blockpage)
+set -euo pipefail
+
+APPLIANCE_ROOT="/opt/jd-dns-appliance"
+# shellcheck disable=SC1091
+source "$APPLIANCE_ROOT/lib/common.sh"
+
+require_root
+load_env
+ensure_dirs
+
+IFACE=$(detect_iface)
+[[ -n "$IFACE" ]] || die "Não foi possível detectar interface de rede"
+IPV4_HOST=$(ipv4_only)
+
+log "Aplicando config: company=$COMPANY_NAME fqdn=$DNS_FQDN ip=$IPV4_ADDRESS iface=$IFACE"
+
+# --- Hostname ---
+hostnamectl set-hostname "$HOSTNAME" || true
+if grep -qE '^10\.0\.0\.1|^127\.0\.1\.1' /etc/hosts 2>/dev/null; then
+  sed -i "s/^127\\.0\\.1\\.1.*/127.0.1.1\t$HOSTNAME/" /etc/hosts || true
+else
+  grep -q "$HOSTNAME" /etc/hosts || echo -e "127.0.1.1\t$HOSTNAME" >> /etc/hosts
+fi
+
+# --- Netplan ---
+RESOLVER_YAML=$(echo "$DNS_RESOLVERS" | tr ',' '\n' | sed 's/^/        - /')
+cat > /etc/netplan/01-jd-dns.yaml <<EOF
+network:
+  version: 2
+  ethernets:
+    $IFACE:
+      addresses:
+        - $IPV4_ADDRESS
+$(if [[ -n "${IPV6_ADDRESS:-}" ]]; then echo "        - $IPV6_ADDRESS"; fi)
+      nameservers:
+        addresses:
+$RESOLVER_YAML
+      routes:
+        - to: default
+          via: $IPV4_GATEWAY
+$(if [[ -n "${IPV6_GATEWAY:-}" ]]; then
+cat <<E6
+        - to: default
+          via: $IPV6_GATEWAY
+E6
+fi)
+EOF
+chmod 600 /etc/netplan/01-jd-dns.yaml
+netplan apply || log "WARN: netplan apply falhou (pode ser normal em chroot)"
+
+# --- Logo ---
+if [[ -f "$LOGO_FILE" ]]; then
+  cp -f "$LOGO_FILE" /var/www/dns-portal/assets/logo.png
+  cp -f "$LOGO_FILE" /var/www/jd-blockpage/logo.png
+  # compat paths usados pela blockpage antiga
+  cp -f "$LOGO_FILE" /var/www/jd-blockpage/jdtelecom-logo.png
+fi
+
+# --- Templates Nginx ---
+IPV6_HOST=""
+if [[ -n "${IPV6_ADDRESS:-}" ]]; then
+  IPV6_HOST="${IPV6_ADDRESS%%/*}"
+fi
+render_template "$TMPL_DIR/nginx-portal.conf.tmpl" /etc/nginx/sites-available/dns-portal
+render_template "$TMPL_DIR/nginx-blockpage.conf.tmpl" /etc/nginx/sites-available/jd-blockpage
+
+if [[ -n "$IPV6_HOST" ]]; then
+  sed -i \
+    -e "s|{{IPV6_LISTEN_80}}|listen [$IPV6_HOST]:80;|g" \
+    -e "s|{{IPV6_LISTEN_443}}|listen [$IPV6_HOST]:443 ssl;|g" \
+    -e "s|{{IPV6_LISTEN_80_DEFAULT}}|listen [$IPV6_HOST]:80 default_server;|g" \
+    -e "s|{{IPV6_LISTEN_443_DEFAULT}}|listen [$IPV6_HOST]:443 ssl default_server;|g" \
+    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/jd-blockpage
+else
+  sed -i \
+    -e "s|{{IPV6_LISTEN_80}}||g" \
+    -e "s|{{IPV6_LISTEN_443}}||g" \
+    -e "s|{{IPV6_LISTEN_80_DEFAULT}}||g" \
+    -e "s|{{IPV6_LISTEN_443_DEFAULT}}||g" \
+    /etc/nginx/sites-available/dns-portal /etc/nginx/sites-available/jd-blockpage
+fi
+
+ln -sfn /etc/nginx/sites-available/dns-portal /etc/nginx/sites-enabled/dns-portal
+ln -sfn /etc/nginx/sites-available/jd-blockpage /etc/nginx/sites-enabled/jd-blockpage
+rm -f /etc/nginx/sites-enabled/default
+
+# --- Branding no portal / blockpage ---
+if [[ -f /var/www/dns-portal/index.html ]]; then
+  # substitui placeholders se existirem; senão faz replace genérico de textos JD
+  sed -i \
+    -e "s|{{COMPANY_NAME}}|$COMPANY_NAME|g" \
+    -e "s|{{DNS_FQDN}}|$DNS_FQDN|g" \
+    -e "s|JD Telecom|$COMPANY_NAME|g" \
+    -e "s|dns01\\.jdtelecom\\.com\\.br|$DNS_FQDN|g" \
+    /var/www/dns-portal/index.html || true
+fi
+if [[ -f /var/www/jd-blockpage/index.html ]]; then
+  sed -i \
+    -e "s|{{COMPANY_NAME}}|$COMPANY_NAME|g" \
+    -e "s|{{DNS_FQDN}}|$DNS_FQDN|g" \
+    -e "s|JD Telecom|$COMPANY_NAME|g" \
+    -e "s|/jdtelecom-logo\\.png|/logo.png|g" \
+    /var/www/jd-blockpage/index.html || true
+fi
+if [[ -f /var/www/dns-portal/js/app.js ]]; then
+  SAFE_NAME=$(echo "$COMPANY_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-' | cut -c1-32)
+  sed -i "s|jdtelecom-blocked-domains|${SAFE_NAME:-provider}-blocked-domains|g" /var/www/dns-portal/js/app.js || true
+  sed -i "s|JD Telecom|$COMPANY_NAME|g" /var/www/dns-portal/js/app.js || true
+fi
+
+chown -R www-data:www-data /var/www/dns-portal /var/www/jd-blockpage
+
+# --- Certificados ---
+mkdir -p /etc/nginx/ssl
+if [[ ! -f /etc/nginx/ssl/blockpage.crt ]]; then
+  openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+    -keyout /etc/nginx/ssl/blockpage.key \
+    -out /etc/nginx/ssl/blockpage.crt \
+    -subj "/CN=dns-blockpage/O=$COMPANY_NAME" 2>/dev/null
+fi
+
+PORTAL_CERT="/etc/nginx/ssl/portal.crt"
+PORTAL_KEY="/etc/nginx/ssl/portal.key"
+if [[ "${ENABLE_LETSENCRYPT,,}" == "true" ]] && command -v certbot >/dev/null; then
+  systemctl reload nginx || true
+  certbot certonly --webroot -w /var/www/letsencrypt \
+    -d "$DNS_FQDN" --email "${LETSENCRYPT_EMAIL:-admin@$DNS_FQDN}" \
+    --agree-tos --non-interactive || log "WARN: certbot falhou; mantendo autoassinado"
+  if [[ -f "/etc/letsencrypt/live/$DNS_FQDN/fullchain.pem" ]]; then
+    PORTAL_CERT="/etc/letsencrypt/live/$DNS_FQDN/fullchain.pem"
+    PORTAL_KEY="/etc/letsencrypt/live/$DNS_FQDN/privkey.pem"
+  fi
+fi
+if [[ ! -f "$PORTAL_CERT" ]]; then
+  openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+    -keyout "$PORTAL_KEY" -out "$PORTAL_CERT" \
+    -subj "/CN=$DNS_FQDN/O=$COMPANY_NAME" 2>/dev/null
+fi
+# injeta paths reais no site portal
+sed -i \
+  -e "s|{{PORTAL_CERT}}|$PORTAL_CERT|g" \
+  -e "s|{{PORTAL_KEY}}|$PORTAL_KEY|g" \
+  /etc/nginx/sites-available/dns-portal
+
+nginx -t && systemctl reload nginx
+
+# --- Technitium: CustomAddress + domínio ---
+if systemctl is-active --quiet dns; then
+  # Login e configura via API HTTP local
+  TOKEN=""
+  LOGIN=$(curl -sS "http://127.0.0.1:5380/api/user/login?user=${ADMIN_USER}&pass=${ADMIN_PASSWORD}" || true)
+  TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token') or d.get('response',{}).get('token',''))" 2>/dev/null || true)
+  if [[ -z "$TOKEN" ]]; then
+    # tenta criar/reset via API create (primeira instalação)
+    curl -sS "http://127.0.0.1:5380/api/user/create?user=${ADMIN_USER}&pass=${ADMIN_PASSWORD}" >/dev/null || true
+    LOGIN=$(curl -sS "http://127.0.0.1:5380/api/user/login?user=${ADMIN_USER}&pass=${ADMIN_PASSWORD}" || true)
+    TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token') or d.get('response',{}).get('token',''))" 2>/dev/null || true)
+  fi
+  if [[ -n "$TOKEN" ]]; then
+    ADDRS="$IPV4_HOST"
+    if [[ -n "${IPV6_ADDRESS:-}" ]]; then
+      ADDRS="$IPV4_HOST,${IPV6_ADDRESS%%/*}"
+    fi
+    curl -sS "http://127.0.0.1:5380/api/settings/set?token=$TOKEN&dnsServerDomain=$DNS_FQDN&enableBlocking=true&blockingType=CustomAddress&customBlockingAddresses=$ADDRS" >/dev/null || true
+    # Query Logs app — tenta instalar/ativar se API existir
+    curl -sS "http://127.0.0.1:5380/api/apps/list?token=$TOKEN" >/dev/null || true
+    log "Technitium settings atualizados (blocking CustomAddress → $ADDRS)"
+  else
+    log "WARN: não foi possível autenticar na API Technitium; configure blocking manualmente em /admin/"
+  fi
+fi
+
+echo "$DNS_FQDN" > "$STATE_DIR/configured-fqdn"
+echo "$IPV4_HOST" > "$STATE_DIR/configured-ip"
+date -Is > "$STATE_DIR/last-apply"
+touch "$STATE_DIR/configured"
+log "Configuração aplicada com sucesso"
+echo "OK — Portal: https://$DNS_FQDN/portal/  Admin: https://$DNS_FQDN/admin/"

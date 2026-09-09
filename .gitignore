@@ -1,0 +1,7 @@
+dist/
+*.iso
+*.tar.gz
+*.zip
+.DS_Store
+__pycache__/
+/tmp/

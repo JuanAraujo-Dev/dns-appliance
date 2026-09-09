@@ -1,0 +1,124 @@
+#!/bin/bash
+# Wizard interativo de primeiro boot (console Proxmox / SSH)
+set -euo pipefail
+
+APPLIANCE_ROOT="/opt/jd-dns-appliance"
+# shellcheck disable=SC1091
+source "$APPLIANCE_ROOT/lib/common.sh"
+
+require_root
+STATE_DIR="/var/lib/jd-dns-appliance"
+mkdir -p "$STATE_DIR" /opt/jd-dns-appliance/branding
+
+if [[ -f "$STATE_DIR/configured" ]] && [[ "${1:-}" != "--force" ]]; then
+  echo "Appliance já configurada. Use: jd-dns-firstboot --force"
+  exit 0
+fi
+
+have_whiptail=0
+command -v whiptail >/dev/null && have_whiptail=1
+
+ask() {
+  local prompt="$1" default="$2" var
+  if [[ $have_whiptail -eq 1 ]]; then
+    var=$(whiptail --inputbox "$prompt" 10 70 "$default" 3>&1 1>&2 2>&3) || exit 1
+  else
+    read -r -p "$prompt [$default]: " var
+    var=${var:-$default}
+  fi
+  printf '%s' "$var"
+}
+
+ask_password() {
+  local prompt="$1" var
+  if [[ $have_whiptail -eq 1 ]]; then
+    var=$(whiptail --passwordbox "$prompt" 10 70 3>&1 1>&2 2>&3) || exit 1
+  else
+    read -r -s -p "$prompt: " var; echo
+  fi
+  printf '%s' "$var"
+}
+
+yesno() {
+  local prompt="$1"
+  if [[ $have_whiptail -eq 1 ]]; then
+    whiptail --yesno "$prompt" 10 70
+  else
+    read -r -p "$prompt [s/N]: " a
+    [[ "${a,,}" == "s" || "${a,,}" == "y" ]]
+  fi
+}
+
+IFACE_DEF=$(detect_iface || true)
+
+clear
+echo "=============================================="
+echo "  JD DNS Appliance — configuração inicial"
+echo "  Stack: Technitium + Portal + Blockpage"
+echo "=============================================="
+echo
+
+COMPANY_NAME=$(ask "Nome do provedor / empresa" "Meu Provedor")
+DNS_FQDN=$(ask "Domínio FQDN do DNS (portal/admin)" "dns01.meuprovedor.com.br")
+HOSTNAME=$(ask "Hostname da VM" "dns01")
+INTERFACE=$(ask "Interface de rede" "${IFACE_DEF:-eth0}")
+IPV4_ADDRESS=$(ask "IPv4 com máscara (CIDR)" "192.0.2.10/24")
+IPV4_GATEWAY=$(ask "Gateway IPv4" "192.0.2.1")
+IPV6_ADDRESS=$(ask "IPv6 com máscara (vazio=sem IPv6)" "")
+IPV6_GATEWAY=$(ask "Gateway IPv6 (vazio=sem)" "")
+ADMIN_USER=$(ask "Usuário admin Technitium/portal" "admin")
+ADMIN_PASSWORD=$(ask_password "Senha admin (será usada no portal)")
+[[ -n "$ADMIN_PASSWORD" ]] || ADMIN_PASSWORD="Mudar@123"
+
+LOGO_SRC=""
+if yesno "Deseja informar caminho de um arquivo de logo PNG agora?\n(depois pode copiar para /opt/jd-dns-appliance/branding/logo.png)"; then
+  LOGO_SRC=$(ask "Caminho do PNG no disco" "/opt/jd-dns-appliance/branding/logo.png")
+fi
+
+ENABLE_LETSENCRYPT="false"
+LETSENCRYPT_EMAIL="noc@$DNS_FQDN"
+if yesno "Usar Let's Encrypt para HTTPS do portal?\n(requer DNS do FQDN apontando para este IP e porta 80 aberta)"; then
+  ENABLE_LETSENCRYPT="true"
+  LETSENCRYPT_EMAIL=$(ask "E-mail Let's Encrypt" "noc@$DNS_FQDN")
+fi
+
+LOGO_FILE="/opt/jd-dns-appliance/branding/logo.png"
+if [[ -n "$LOGO_SRC" && -f "$LOGO_SRC" ]]; then
+  cp -f "$LOGO_SRC" "$LOGO_FILE"
+elif [[ ! -f "$LOGO_FILE" ]]; then
+  # mantém logo empacotada padrão se existir
+  [[ -f /var/www/dns-portal/assets/logo.png ]] && cp -f /var/www/dns-portal/assets/logo.png "$LOGO_FILE" || true
+fi
+
+cat > /etc/jd-dns-appliance.env <<EOF
+COMPANY_NAME="$COMPANY_NAME"
+DNS_FQDN="$DNS_FQDN"
+HOSTNAME="$HOSTNAME"
+INTERFACE="$INTERFACE"
+IPV4_ADDRESS="$IPV4_ADDRESS"
+IPV4_GATEWAY="$IPV4_GATEWAY"
+IPV6_ADDRESS="$IPV6_ADDRESS"
+IPV6_GATEWAY="$IPV6_GATEWAY"
+DNS_RESOLVERS="1.1.1.1,8.8.8.8"
+ADMIN_USER="$ADMIN_USER"
+ADMIN_PASSWORD="$ADMIN_PASSWORD"
+LOGO_FILE="$LOGO_FILE"
+ENABLE_LETSENCRYPT="$ENABLE_LETSENCRYPT"
+LETSENCRYPT_EMAIL="$LETSENCRYPT_EMAIL"
+QUERYLOG_MAX_DAYS="30"
+QUERYLOG_MAX_RECORDS="1000000"
+EOF
+chmod 600 /etc/jd-dns-appliance.env
+
+echo
+echo "Aplicando configuração..."
+"$APPLIANCE_ROOT/bin/jd-dns-apply-config"
+
+systemctl disable jd-dns-firstboot.service 2>/dev/null || true
+echo
+echo "Pronto."
+echo "  Portal:  https://$DNS_FQDN/portal/"
+echo "  Admin:   https://$DNS_FQDN/admin/"
+echo "  Usuário: $ADMIN_USER"
+echo
+echo "Para reconfigurar depois: jd-dns-firstboot --force"
